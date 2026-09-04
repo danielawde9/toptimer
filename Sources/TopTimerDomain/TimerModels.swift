@@ -161,6 +161,31 @@ public struct TimerItem: Codable, Equatable, Sendable {
         )
     }
 
+    public static func countdown(
+        title: String,
+        duration: TimeInterval,
+        details: String = "",
+        tags: [String] = [],
+        recurrence: RecurrenceRule = .none,
+        alertName: String? = nil,
+        alertVolume: Double = 1,
+        id: UUID = UUID(),
+        occurrenceID: UUID = UUID()
+    ) throws -> TimerItem {
+        try countdown(
+            title: title,
+            duration: duration,
+            details: details,
+            tags: tags,
+            recurrence: recurrence,
+            alertName: alertName,
+            alertVolume: alertVolume,
+            id: id,
+            occurrenceID: occurrenceID,
+            createdAt: .now
+        )
+    }
+
     public static func stopwatch(
         title: String,
         details: String = "",
@@ -184,6 +209,29 @@ public struct TimerItem: Codable, Equatable, Sendable {
             recurrence: recurrence,
             alertName: alertName,
             alertVolume: alertVolume
+        )
+    }
+
+    public static func stopwatch(
+        title: String,
+        details: String = "",
+        tags: [String] = [],
+        recurrence: RecurrenceRule = .none,
+        alertName: String? = nil,
+        alertVolume: Double = 1,
+        id: UUID = UUID(),
+        occurrenceID: UUID = UUID()
+    ) throws -> TimerItem {
+        try stopwatch(
+            title: title,
+            details: details,
+            tags: tags,
+            recurrence: recurrence,
+            alertName: alertName,
+            alertVolume: alertVolume,
+            id: id,
+            occurrenceID: occurrenceID,
+            createdAt: .now
         )
     }
 
