@@ -90,3 +90,38 @@ aligned with the recurrence scheduler's forward, next-occurrence behavior.
 a validation error and UI correction; advancing to the next day would change the
 alarm's date; preferring the second repeated occurrence would change the fold
 selection and elapsed duration.
+
+## 2026-09-04 — Running recurrence successors
+
+**Decision:** Completing a recurring countdown immediately creates one distinct,
+running successor whose absolute deadline is the next recurrence occurrence.
+
+**Why:** The next occurrence can be scheduled and recovered without waiting for
+the user to start it, while preserving the original duration and metadata.
+
+**If the client answers differently:** Successors could instead be persisted as
+idle drafts, but scheduling and menu-bar behavior would need an explicit start
+action for every occurrence.
+
+## 2026-09-04 — Scheduled-window successor duration
+
+**Decision:** A running successor's countdown duration equals the elapsed window
+from completion to its next scheduled deadline. The recurrence rule remains
+unchanged so later completions continue using the configured schedule.
+
+**Why:** Pause, resume, restart, and persisted timer invariants remain coherent
+even when a calendar recurrence is many hours or days away.
+
+**If the client answers differently:** A pre-alert window could use the original
+duration, but it would need a separate scheduled-deadline field and explicit UI
+semantics for the interval before that alert.
+
+## 2026-09-04 — Clarification superseding original-duration wording
+
+This clarification supersedes only the sentence in **Running recurrence
+successors** that said the original numeric duration is preserved. Title,
+description, tags, recurrence, and sound metadata are preserved. For calendar
+schedules, active duration is the completion-to-next-deadline window; for fixed
+intervals, it is the interval. This prevents invalid pause, progress, and
+restart state. If pre-alert semantics are desired, add a separate template or
+pre-alert field and corresponding UI.

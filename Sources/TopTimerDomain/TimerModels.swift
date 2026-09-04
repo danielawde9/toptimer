@@ -1,14 +1,15 @@
 import Foundation
 
-public enum TimerValidationError: Error, Equatable {
+public enum TimerValidationError: Error, Equatable, Sendable {
     case nonPositiveDuration
     case titleTooLong
     case descriptionTooLong
     case tooManyTags
     case tagTooLong
+    case recurrenceUnsupportedForStopwatch
 }
 
-public enum RecurrenceValidationError: Error, Equatable {
+public enum RecurrenceValidationError: Error, Equatable, Sendable {
     case invalidInterval
     case invalidClockTime
     case invalidWeekday
@@ -74,37 +75,46 @@ private func validateTimerMetadata(title: String, details: String, tags: [String
 }
 
 private func validateRecurrence(_ recurrence: RecurrenceRule) throws {
-    func validClockTime(hour: Int, minute: Int) -> Bool {
-        (0...23).contains(hour) && (0...59).contains(minute)
-    }
+    try RecurrenceRuleValidator.validate(recurrence)
+}
 
-    switch recurrence {
-    case .none:
-        return
-    case let .interval(seconds):
-        guard seconds.isFinite, seconds > 0 else {
-            throw RecurrenceValidationError.invalidInterval
+internal enum RecurrenceRuleValidator {
+    static let minimumInterval: TimeInterval = 1
+    static let maximumInterval: TimeInterval = 365 * 24 * 60 * 60
+
+    static func validate(_ recurrence: RecurrenceRule) throws {
+        func validClockTime(hour: Int, minute: Int) -> Bool {
+            (0...23).contains(hour) && (0...59).contains(minute)
         }
-    case let .daily(hour, minute), let .weekdays(hour, minute):
-        guard validClockTime(hour: hour, minute: minute) else {
-            throw RecurrenceValidationError.invalidClockTime
-        }
-    case let .weekly(weekday, hour, minute):
-        guard (1...7).contains(weekday) else {
-            throw RecurrenceValidationError.invalidWeekday
-        }
-        guard validClockTime(hour: hour, minute: minute) else {
-            throw RecurrenceValidationError.invalidClockTime
-        }
-    case let .selectedWeekdays(weekdays, hour, minute):
-        guard !weekdays.isEmpty else {
-            throw RecurrenceValidationError.emptyWeekdays
-        }
-        guard weekdays.allSatisfy({ (1...7).contains($0) }) else {
-            throw RecurrenceValidationError.invalidWeekday
-        }
-        guard validClockTime(hour: hour, minute: minute) else {
-            throw RecurrenceValidationError.invalidClockTime
+
+        switch recurrence {
+        case .none:
+            return
+        case let .interval(seconds):
+            guard seconds.isFinite, seconds >= minimumInterval, seconds <= maximumInterval else {
+                throw RecurrenceValidationError.invalidInterval
+            }
+        case let .daily(hour, minute), let .weekdays(hour, minute):
+            guard validClockTime(hour: hour, minute: minute) else {
+                throw RecurrenceValidationError.invalidClockTime
+            }
+        case let .weekly(weekday, hour, minute):
+            guard (1...7).contains(weekday) else {
+                throw RecurrenceValidationError.invalidWeekday
+            }
+            guard validClockTime(hour: hour, minute: minute) else {
+                throw RecurrenceValidationError.invalidClockTime
+            }
+        case let .selectedWeekdays(weekdays, hour, minute):
+            guard !weekdays.isEmpty else {
+                throw RecurrenceValidationError.emptyWeekdays
+            }
+            guard weekdays.allSatisfy({ (1...7).contains($0) }) else {
+                throw RecurrenceValidationError.invalidWeekday
+            }
+            guard validClockTime(hour: hour, minute: minute) else {
+                throw RecurrenceValidationError.invalidClockTime
+            }
         }
     }
 }
@@ -137,6 +147,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
     public internal(set) var alertName: String?
     public internal(set) var alertVolume: Double
     public internal(set) var successorID: UUID?
+    public internal(set) var predecessorOccurrenceID: UUID?
 
     public static func countdown(
         title: String,
@@ -260,10 +271,14 @@ public struct TimerItem: Codable, Equatable, Sendable {
         recurrence: RecurrenceRule,
         alertName: String? = nil,
         alertVolume: Double = 1,
-        successorID: UUID? = nil
+        successorID: UUID? = nil,
+        predecessorOccurrenceID: UUID? = nil
     ) throws {
         try validateTimerMetadata(title: title, details: details, tags: tags)
         try validateRecurrence(recurrence)
+        if kind == .stopwatch, recurrence != .none {
+            throw TimerValidationError.recurrenceUnsupportedForStopwatch
+        }
 
         switch kind {
         case .countdown:
@@ -298,6 +313,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         self.alertName = alertName
         self.alertVolume = alertVolume
         self.successorID = successorID
+        self.predecessorOccurrenceID = predecessorOccurrenceID
     }
 
     public mutating func updateMetadata(title: String, details: String, tags: [String]) throws {
@@ -329,6 +345,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         case alertName
         case alertVolume
         case successorID
+        case predecessorOccurrenceID
     }
 
     public init(from decoder: Decoder) throws {
@@ -349,9 +366,15 @@ public struct TimerItem: Codable, Equatable, Sendable {
         let createdAt = try container.decode(Date.self, forKey: .createdAt)
         let deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
         let recurrence = try container.decode(RecurrenceRule.self, forKey: .recurrence)
+        let id = try container.decode(UUID.self, forKey: .id)
+        let occurrenceID = try container.decode(UUID.self, forKey: .occurrenceID)
+        let successorID = try container.decodeIfPresent(UUID.self, forKey: .successorID)
+        let predecessorOccurrenceID = try container.decodeIfPresent(UUID.self, forKey: .predecessorOccurrenceID)
 
         do {
             try Self.validateFullShape(
+                id: id,
+                occurrenceID: occurrenceID,
                 title: title,
                 details: details,
                 tags: tags,
@@ -367,14 +390,16 @@ public struct TimerItem: Codable, Equatable, Sendable {
                 lastTransitionAt: lastTransitionAt,
                 completedAt: completedAt,
                 deletedAt: deletedAt,
-                recurrence: recurrence
+                recurrence: recurrence,
+                successorID: successorID,
+                predecessorOccurrenceID: predecessorOccurrenceID
             )
         } catch {
             throw Self.corrupted(decoder, reason: "Invalid timer metadata or recurrence")
         }
 
-        self.id = try container.decode(UUID.self, forKey: .id)
-        self.occurrenceID = try container.decode(UUID.self, forKey: .occurrenceID)
+        self.id = id
+        self.occurrenceID = occurrenceID
         self.title = title
         self.details = details
         self.tags = tags
@@ -393,12 +418,15 @@ public struct TimerItem: Codable, Equatable, Sendable {
         self.recurrence = recurrence
         self.alertName = try container.decodeIfPresent(String.self, forKey: .alertName)
         self.alertVolume = try container.decode(Double.self, forKey: .alertVolume)
-        self.successorID = try container.decodeIfPresent(UUID.self, forKey: .successorID)
+        self.successorID = successorID
+        self.predecessorOccurrenceID = predecessorOccurrenceID
     }
 
     public func encode(to encoder: Encoder) throws {
         do {
             try Self.validateFullShape(
+                id: id,
+                occurrenceID: occurrenceID,
                 title: title,
                 details: details,
                 tags: tags,
@@ -414,7 +442,9 @@ public struct TimerItem: Codable, Equatable, Sendable {
                 lastTransitionAt: lastTransitionAt,
                 completedAt: completedAt,
                 deletedAt: deletedAt,
-                recurrence: recurrence
+                recurrence: recurrence,
+                successorID: successorID,
+                predecessorOccurrenceID: predecessorOccurrenceID
             )
         } catch {
             throw EncodingError.invalidValue(
@@ -448,9 +478,12 @@ public struct TimerItem: Codable, Equatable, Sendable {
         try container.encodeIfPresent(alertName, forKey: .alertName)
         try container.encode(alertVolume, forKey: .alertVolume)
         try container.encodeIfPresent(successorID, forKey: .successorID)
+        try container.encodeIfPresent(predecessorOccurrenceID, forKey: .predecessorOccurrenceID)
     }
 
     private static func validateFullShape(
+        id: UUID,
+        occurrenceID: UUID,
         title: String,
         details: String,
         tags: [String],
@@ -466,10 +499,25 @@ public struct TimerItem: Codable, Equatable, Sendable {
         lastTransitionAt: Date?,
         completedAt: Date?,
         deletedAt: Date?,
-        recurrence: RecurrenceRule
+        recurrence: RecurrenceRule,
+        successorID: UUID?,
+        predecessorOccurrenceID: UUID?
     ) throws {
         try validateTimerMetadata(title: title, details: details, tags: tags)
         try validateRecurrence(recurrence)
+        guard !(kind == .stopwatch && recurrence != .none) else {
+            throw TimerShapeValidationError.invalidShape
+        }
+        if let predecessorOccurrenceID {
+            guard predecessorOccurrenceID != occurrenceID else {
+                throw TimerShapeValidationError.invalidShape
+            }
+        }
+        if let successorID {
+            guard successorID != id else {
+                throw TimerShapeValidationError.invalidShape
+            }
+        }
         try validateChronology(
             kind: kind,
             state: state,
