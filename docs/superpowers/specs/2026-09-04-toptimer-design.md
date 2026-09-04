@@ -28,7 +28,8 @@ Return starts the entered timer. Supported forms include:
 - `15m`, `1.5h`, `1h 20m`, and `60s`;
 - `1:30:45` for hours, minutes, and seconds;
 - `@3pm` and `@14:30` for a countdown to a wall-clock time;
-- an optional label and one or more `#tags`;
+- an optional title and one or more `#tags`, such as
+  `25m Design review #client`;
 - blank input for a stopwatch.
 
 Bare numbers use minutes by default. Invalid or ambiguous input remains in the
@@ -37,11 +38,15 @@ field and displays a concise correction next to it.
 Recent valid entries, tags, and saved presets appear as keyboard-navigable
 suggestions. Suggestions are capped at 20 items.
 
+The expanded editor provides a title, an optional description of up to 500
+characters, and up to 12 tags of 32 characters each. A description is not
+required to start a timer and never slows down quick entry.
+
 ### 2.2 Timers and stopwatches
 
 The app can run multiple independent timers and stopwatches. Each item supports:
 
-- a user-visible name and tags;
+- a user-visible title, optional description, and tags;
 - start, pause, resume, restart, duplicate, edit, and delete;
 - a selected built-in alert or imported sound and volume;
 - optional recurrence;
@@ -70,7 +75,8 @@ to the next valid local time; a repeated local time uses the first occurrence.
 ### 2.4 Notifications and sound
 
 TopTimer requests notification permission in context when the first timer is
-created. A completed timer produces a native notification with actions:
+created. A completed timer notification shows the title and, when present, the
+first 120 characters of its description. It provides these actions:
 
 - **Stop** acknowledges the completion;
 - **Repeat** starts the same duration again;
@@ -90,11 +96,14 @@ Every stopped or completed run creates a history record. The history window
 supports:
 
 - date-range and tag filters;
+- title, description, and tag search;
 - editing a past record;
 - soft deletion and recovery;
 - totals by timer and tag;
 - daily and weekly charts;
 - CSV export using UTF-8 and stable column names.
+
+CSV exports include title, description, and tags as separate columns.
 
 The initial history view loads at most 200 records. Additional records use cursor
 pagination. Reports query only their requested date range.
@@ -138,9 +147,10 @@ accessibility label, visible keyboard focus, and a minimum 28-point pointer targ
 
 ### 3.3 Timer list
 
-The expanded list is approximately 340 points wide. Each row shows name, tags,
+The expanded list is approximately 340 points wide. Each row shows title, tags,
 tabular remaining time, end time, recurrence summary, and a two-point progress
-line. Controls appear on hover and keyboard focus without shifting row layout.
+line. The full description appears in the detail editor rather than crowding the
+list. Controls appear on hover and keyboard focus without shifting row layout.
 The list is scrollable and renders at most 100 rows in one view.
 
 Reduced-motion settings disable nonessential transitions. Increased contrast,
@@ -189,8 +199,9 @@ Completion follows this sequence:
 3. Schedule the next notification.
 4. Deliver the completion alert and refresh the interface.
 
-Required invariants include positive countdown duration, bounded labels and tags,
-one history completion per occurrence, and at most one successor occurrence.
+Required invariants include positive countdown duration, bounded titles,
+descriptions, and tags, one history completion per occurrence, and at most one
+successor occurrence.
 
 ## 6. Failure behavior
 
@@ -218,7 +229,8 @@ Test-driven implementation covers:
 - simultaneous timer priority selection;
 - recurrence uniqueness and calendar behavior across DST transitions;
 - persistence recovery after relaunch and schema migration;
-- history totals, filtering, editing, soft deletion, and pagination;
+- history totals, metadata search, filtering, editing, soft deletion, and
+  pagination;
 - stable RFC 4180-compatible CSV export;
 - notification scheduling and action routing through protocol fakes;
 - menu-bar formatting and accessibility identifiers.

@@ -62,3 +62,16 @@ running work. Explicit recurrence prevents accidental repeating alerts.
 **If the client answers differently:** Menu-bar selection can become a configurable
 preference, and additional recurrence rules can be added without changing saved
 timer identity.
+
+## 2026-09-04 — Timer metadata
+
+**Decision:** Each timer and stopwatch has a short title, an optional description
+of up to 500 characters, and up to 12 tags of 32 characters each. Title and tags
+can be entered in the quick command; descriptions use the expanded editor.
+
+**Why:** The client wants users to record what a timer is for and organize timers
+without making fast creation cumbersome. Explicit limits keep storage, search,
+notifications, and exports predictable.
+
+**If the client answers differently:** The limits can be raised with matching UI,
+storage, notification truncation, and export tests.
