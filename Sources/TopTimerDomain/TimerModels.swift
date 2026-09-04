@@ -123,6 +123,8 @@ public struct TimerItem: Codable, Equatable, Sendable {
     public internal(set) var state: TimerState
     public let duration: TimeInterval?
     public internal(set) var remaining: TimeInterval?
+    /// Wall-clock seconds spent paused by a stopwatch. Countdown timers keep this at zero.
+    public internal(set) var accumulatedPause: TimeInterval
     public internal(set) var deadline: Date?
     public let createdAt: Date
     public internal(set) var startedAt: Date?
@@ -244,6 +246,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         kind: TimerKind,
         duration: TimeInterval?,
         remaining: TimeInterval? = nil,
+        accumulatedPause: TimeInterval = 0,
         deadline: Date? = nil,
         state: TimerState = .idle,
         createdAt: Date,
@@ -266,10 +269,12 @@ public struct TimerItem: Codable, Equatable, Sendable {
             }
             self.duration = duration
             self.remaining = remaining ?? duration
+            self.accumulatedPause = 0
             self.deadline = deadline
         case .stopwatch:
             self.duration = nil
             self.remaining = nil
+            self.accumulatedPause = accumulatedPause
             self.deadline = nil
         }
 
@@ -308,6 +313,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         case state
         case duration
         case remaining
+        case accumulatedPause
         case deadline
         case createdAt
         case startedAt
@@ -328,6 +334,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         let kind = try container.decode(TimerKind.self, forKey: .kind)
         let duration = try container.decodeIfPresent(TimeInterval.self, forKey: .duration)
         let remaining = try container.decodeIfPresent(TimeInterval.self, forKey: .remaining)
+        let accumulatedPause = try container.decodeIfPresent(TimeInterval.self, forKey: .accumulatedPause) ?? 0
         let deadline = try container.decodeIfPresent(Date.self, forKey: .deadline)
         let state = try container.decode(TimerState.self, forKey: .state)
         let startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt)
@@ -343,6 +350,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
                 kind: kind,
                 duration: duration,
                 remaining: remaining,
+                accumulatedPause: accumulatedPause,
                 deadline: deadline,
                 state: state,
                 startedAt: startedAt,
@@ -363,6 +371,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         self.state = state
         self.duration = duration
         self.remaining = remaining
+        self.accumulatedPause = accumulatedPause
         self.deadline = deadline
         self.createdAt = try container.decode(Date.self, forKey: .createdAt)
         self.startedAt = startedAt
@@ -384,6 +393,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
                 kind: kind,
                 duration: duration,
                 remaining: remaining,
+                accumulatedPause: accumulatedPause,
                 deadline: deadline,
                 state: state,
                 startedAt: startedAt,
@@ -411,6 +421,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         try container.encode(state, forKey: .state)
         try container.encodeIfPresent(duration, forKey: .duration)
         try container.encodeIfPresent(remaining, forKey: .remaining)
+        try container.encode(accumulatedPause, forKey: .accumulatedPause)
         try container.encodeIfPresent(deadline, forKey: .deadline)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(startedAt, forKey: .startedAt)
@@ -430,6 +441,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         kind: TimerKind,
         duration: TimeInterval?,
         remaining: TimeInterval?,
+        accumulatedPause: TimeInterval,
         deadline: Date?,
         state: TimerState,
         startedAt: Date?,
@@ -439,9 +451,15 @@ public struct TimerItem: Codable, Equatable, Sendable {
     ) throws {
         try validateTimerMetadata(title: title, details: details, tags: tags)
         try validateRecurrence(recurrence)
+        guard accumulatedPause.isFinite, accumulatedPause >= 0 else {
+            throw TimerShapeValidationError.invalidShape
+        }
 
         switch kind {
         case .countdown:
+            guard accumulatedPause == 0 else {
+                throw TimerShapeValidationError.invalidShape
+            }
             guard let duration, duration.isFinite, duration > 0 else {
                 throw TimerShapeValidationError.invalidShape
             }
