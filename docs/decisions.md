@@ -125,3 +125,17 @@ schedules, active duration is the completion-to-next-deadline window; for fixed
 intervals, it is the interval. This prevents invalid pause, progress, and
 restart state. If pre-alert semantics are desired, add a separate template or
 pre-alert field and corresponding UI.
+
+## 2026-09-04 — Empty-input Run action
+
+**Decision:** Return and the visible Run/Play control share one creation action.
+With timer input, the action starts a countdown; with an empty field, it starts a
+stopwatch at `00:00` that counts upward.
+
+**Why:** The client explicitly expects pressing Run with no configured duration to
+start count-up timing. One shared action keeps mouse and keyboard behavior
+consistent.
+
+**If the client answers differently:** A separate stopwatch control could be
+added, but it would make the compact popover denser and split equivalent creation
+behavior across two actions.

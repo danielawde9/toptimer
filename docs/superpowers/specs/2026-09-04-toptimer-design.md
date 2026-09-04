@@ -23,14 +23,15 @@ Reference used to define public feature parity:
 ### 2.1 Fast entry
 
 The menu-bar item opens a compact popover with a focused text field. Pressing
-Return starts the entered timer. Supported forms include:
+Return or the visible Run/Play control starts the entered timer. Supported forms
+include:
 
 - `15m`, `1.5h`, `1h 20m`, and `60s`;
 - `1:30:45` for hours, minutes, and seconds;
 - `@3pm` and `@14:30` for a countdown to a wall-clock time;
 - an optional title and one or more `#tags`, such as
   `25m Design review #client`;
-- blank input for a stopwatch.
+- blank input for a stopwatch that starts at `00:00` and counts upward.
 
 Bare numbers use minutes by default. Invalid or ambiguous input remains in the
 field and displays a concise correction next to it.
@@ -142,8 +143,10 @@ dashboard treatment inside the popover.
 
 The default popover is approximately 260 points wide. Its first row contains an
 original TopTimer mark and the borderless entry field. A compact toolbar contains
-settings, add, timer list, and quit controls. Every control has a tooltip,
-accessibility label, visible keyboard focus, and a minimum 28-point pointer target.
+settings, Run/Play, timer list, and quit controls. Run/Play starts the parsed
+countdown or starts a stopwatch when the field is empty. Every control has a
+tooltip, accessibility label, visible keyboard focus, and a minimum 28-point
+pointer target.
 
 ### 3.3 Timer list
 

@@ -688,10 +688,12 @@ the global shortcut opens it and restores the previously active app after close.
 - [ ] **Step 4: Implement the approved quick-entry view**
 
 Build the 260-point popover with the original mark, borderless focused field,
-precise inline error, Return-to-create, Space-to-pause when all input text is
-selected, keyboard suggestion list, and icon-only settings/add/list/quit toolbar.
-Use system colors, `#6F9BFF` timing accent, SF typography, 8-point outer geometry,
-tooltips, focus rings, and accessibility identifiers.
+precise inline error, Return-to-create, a visible Run/Play control, Space-to-pause
+when all input text is selected, keyboard suggestion list, and icon-only
+settings/Run/list/quit toolbar. Return and Run use the same action; when the field
+is empty they start a count-up stopwatch at `00:00`. Use system colors,
+`#6F9BFF` timing accent, SF typography, 8-point outer geometry, tooltips, focus
+rings, and accessibility identifiers.
 
 - [ ] **Step 5: Implement the bounded timer list and detail editor**
 
