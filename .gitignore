@@ -6,4 +6,5 @@ DerivedData/
 xcuserdata/
 .superpowers/
 .swarm/
+.worktrees/
 outputs/
