@@ -178,6 +178,18 @@ final class TimerModelsTests: XCTestCase {
         }
     }
 
+    func testTransitionMarkerMustMatchAnActiveOrCompletedState() throws {
+        let date = Date(timeIntervalSince1970: 1_000)
+        var item = try TimerItem.stopwatch(title: "Watch", createdAt: date)
+        item.lastTransitionAt = date
+
+        XCTAssertThrowsError(try JSONEncoder().encode(item)) { error in
+            guard case EncodingError.invalidValue = error else {
+                return XCTFail("Expected invalidValue")
+            }
+        }
+    }
+
     func testPersistedRunningAndPausedShapesAreAcceptedOnlyWhenCoherent() throws {
         let date = Date(timeIntervalSince1970: 1_000)
         var running = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: date)

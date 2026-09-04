@@ -45,24 +45,28 @@ final class TimerEngineTests: XCTestCase {
         try timer.start(at: start)
         XCTAssertEqual(timer.state, .running)
         XCTAssertEqual(timer.startedAt, start)
+        XCTAssertEqual(timer.lastTransitionAt, start)
         XCTAssertEqual(timer.deadline, start.addingTimeInterval(60))
         try roundTrip(timer)
 
         try timer.pause(at: start.addingTimeInterval(20))
         XCTAssertEqual(timer.state, .paused)
         XCTAssertEqual(timer.remaining, 40)
+        XCTAssertEqual(timer.lastTransitionAt, start.addingTimeInterval(20))
         XCTAssertNil(timer.deadline)
         try roundTrip(timer)
 
         try timer.resume(at: start.addingTimeInterval(100))
         XCTAssertEqual(timer.state, .running)
         XCTAssertEqual(timer.startedAt, start)
+        XCTAssertEqual(timer.lastTransitionAt, start.addingTimeInterval(100))
         XCTAssertEqual(timer.deadline, start.addingTimeInterval(140))
         try roundTrip(timer)
 
         try timer.complete(at: start.addingTimeInterval(141))
         XCTAssertEqual(timer.state, .completed)
         XCTAssertEqual(timer.completedAt, start.addingTimeInterval(141))
+        XCTAssertEqual(timer.lastTransitionAt, start.addingTimeInterval(141))
         XCTAssertEqual(timer.remaining(at: start.addingTimeInterval(141)), 0)
         try roundTrip(timer)
         XCTAssertThrowsError(try timer.complete(at: start.addingTimeInterval(142))) { error in
@@ -82,6 +86,7 @@ final class TimerEngineTests: XCTestCase {
         try timer.restart(at: restart)
         XCTAssertEqual(timer.state, .running)
         XCTAssertEqual(timer.startedAt, restart)
+        XCTAssertEqual(timer.lastTransitionAt, restart)
         XCTAssertEqual(timer.deadline, restart.addingTimeInterval(90))
         XCTAssertNil(timer.completedAt)
         XCTAssertNil(timer.deletedAt)
@@ -129,6 +134,7 @@ final class TimerEngineTests: XCTestCase {
         XCTAssertEqual(duplicate.recurrence, timer.recurrence)
         XCTAssertEqual(duplicate.alertName, timer.alertName)
         XCTAssertEqual(duplicate.alertVolume, timer.alertVolume)
+        XCTAssertNil(duplicate.lastTransitionAt)
         try roundTrip(duplicate)
     }
 
@@ -158,6 +164,51 @@ final class TimerEngineTests: XCTestCase {
         try timer.complete(at: start.addingTimeInterval(90))
 
         XCTAssertEqual(timer.elapsed(at: start.addingTimeInterval(500)), 30)
+        try roundTrip(timer)
+    }
+
+    func testCountdownRejectsBackwardPauseAfterResume() throws {
+        let start = Date(timeIntervalSince1970: 7_750)
+        var timer = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: start)
+        try timer.start(at: start)
+        try timer.pause(at: start.addingTimeInterval(20))
+        try timer.resume(at: start.addingTimeInterval(100))
+
+        XCTAssertThrowsError(try timer.pause(at: start.addingTimeInterval(50))) { error in
+            XCTAssertEqual(error as? TimerTransitionError, .invalidTimestamp)
+        }
+        try roundTrip(timer)
+    }
+
+    func testStopwatchRejectsBackwardCompletionAfterResume() throws {
+        let start = Date(timeIntervalSince1970: 7_800)
+        var timer = try TimerItem.stopwatch(title: "Watch", createdAt: start)
+        try timer.start(at: start)
+        try timer.pause(at: start.addingTimeInterval(20))
+        try timer.resume(at: start.addingTimeInterval(100))
+
+        XCTAssertThrowsError(try timer.complete(at: start.addingTimeInterval(50))) { error in
+            XCTAssertEqual(error as? TimerTransitionError, .invalidTimestamp)
+        }
+        try roundTrip(timer)
+    }
+
+    func testRestartRejectsBackwardTransitionAndResetsBookkeepingForward() throws {
+        let start = Date(timeIntervalSince1970: 7_850)
+        var timer = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: start)
+        try timer.start(at: start)
+        try timer.pause(at: start.addingTimeInterval(20))
+        try timer.resume(at: start.addingTimeInterval(100))
+
+        XCTAssertThrowsError(try timer.restart(at: start.addingTimeInterval(50))) { error in
+            XCTAssertEqual(error as? TimerTransitionError, .invalidTimestamp)
+        }
+
+        let restart = start.addingTimeInterval(200)
+        try timer.restart(at: restart)
+        XCTAssertEqual(timer.lastTransitionAt, restart)
+        XCTAssertEqual(timer.startedAt, restart)
+        XCTAssertEqual(timer.remaining(at: restart), 60)
         try roundTrip(timer)
     }
 

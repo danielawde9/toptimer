@@ -48,6 +48,7 @@ public extension TimerItem {
         state = .running
         startedAt = date
         pausedAt = nil
+        lastTransitionAt = date
         completedAt = nil
         deletedAt = nil
     }
@@ -57,7 +58,7 @@ public extension TimerItem {
             throw TimerTransitionError.invalidState
         }
         guard let startedAt else { throw TimerTransitionError.invalidState }
-        try requireNotBefore(date, startedAt)
+        try requireNotBefore(date, lastTransitionAt ?? startedAt)
 
         switch kind {
         case .countdown:
@@ -73,6 +74,7 @@ public extension TimerItem {
         }
         state = .paused
         pausedAt = date
+        lastTransitionAt = date
     }
 
     mutating func resume(at date: Date) throws {
@@ -82,7 +84,7 @@ public extension TimerItem {
         guard let startedAt, let pausedAt else {
             throw TimerTransitionError.invalidState
         }
-        try requireNotBefore(date, pausedAt)
+        try requireNotBefore(date, lastTransitionAt ?? pausedAt)
 
         switch kind {
         case .countdown:
@@ -100,11 +102,15 @@ public extension TimerItem {
         state = .running
         self.startedAt = startedAt
         self.pausedAt = nil
+        lastTransitionAt = date
     }
 
     mutating func restart(at date: Date) throws {
         guard validTimerDate(date) else {
             throw TimerTransitionError.invalidTimestamp
+        }
+        if let lastTransitionAt {
+            try requireNotBefore(date, lastTransitionAt)
         }
 
         switch kind {
@@ -121,6 +127,7 @@ public extension TimerItem {
         state = .running
         startedAt = date
         pausedAt = nil
+        lastTransitionAt = date
         completedAt = nil
         deletedAt = nil
     }
@@ -132,6 +139,10 @@ public extension TimerItem {
         if state == .completed || state == .acknowledged {
             throw TimerTransitionError.alreadyCompleted
         }
+        guard let temporalFloor = lastTransitionAt ?? pausedAt ?? startedAt else {
+            throw TimerTransitionError.invalidState
+        }
+        try requireNotBefore(date, temporalFloor)
 
         switch kind {
         case .countdown:
@@ -166,6 +177,7 @@ public extension TimerItem {
         }
         state = .completed
         pausedAt = nil
+        lastTransitionAt = date
         completedAt = date
         deletedAt = nil
     }
@@ -177,11 +189,12 @@ public extension TimerItem {
         guard validTimerDate(date) else {
             throw TimerTransitionError.invalidTimestamp
         }
-        if let completedAt {
-            try requireNotBefore(date, completedAt)
+        if let temporalFloor = lastTransitionAt ?? completedAt {
+            try requireNotBefore(date, temporalFloor)
         }
         state = .acknowledged
         deletedAt = date
+        lastTransitionAt = date
     }
 
     func duplicate(at date: Date = .now) throws -> TimerItem {

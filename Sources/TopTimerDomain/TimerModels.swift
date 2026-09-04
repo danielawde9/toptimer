@@ -129,6 +129,8 @@ public struct TimerItem: Codable, Equatable, Sendable {
     public let createdAt: Date
     public internal(set) var startedAt: Date?
     public internal(set) var pausedAt: Date?
+    /// The latest transition time, used to reject temporal regressions after resume.
+    public internal(set) var lastTransitionAt: Date?
     public internal(set) var completedAt: Date?
     public internal(set) var deletedAt: Date?
     public internal(set) var recurrence: RecurrenceRule
@@ -252,6 +254,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         createdAt: Date,
         startedAt: Date? = nil,
         pausedAt: Date? = nil,
+        lastTransitionAt: Date? = nil,
         completedAt: Date? = nil,
         deletedAt: Date? = nil,
         recurrence: RecurrenceRule,
@@ -288,6 +291,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         self.createdAt = createdAt
         self.startedAt = startedAt
         self.pausedAt = pausedAt
+        self.lastTransitionAt = lastTransitionAt
         self.completedAt = completedAt
         self.deletedAt = deletedAt
         self.recurrence = recurrence
@@ -318,6 +322,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         case createdAt
         case startedAt
         case pausedAt
+        case lastTransitionAt
         case completedAt
         case deletedAt
         case recurrence
@@ -339,6 +344,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         let state = try container.decode(TimerState.self, forKey: .state)
         let startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt)
         let pausedAt = try container.decodeIfPresent(Date.self, forKey: .pausedAt)
+        let lastTransitionAt = try container.decodeIfPresent(Date.self, forKey: .lastTransitionAt)
         let completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
         let recurrence = try container.decode(RecurrenceRule.self, forKey: .recurrence)
 
@@ -355,6 +361,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
                 state: state,
                 startedAt: startedAt,
                 pausedAt: pausedAt,
+                lastTransitionAt: lastTransitionAt,
                 completedAt: completedAt,
                 recurrence: recurrence
             )
@@ -376,6 +383,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         self.createdAt = try container.decode(Date.self, forKey: .createdAt)
         self.startedAt = startedAt
         self.pausedAt = pausedAt
+        self.lastTransitionAt = lastTransitionAt
         self.completedAt = completedAt
         self.deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
         self.recurrence = recurrence
@@ -398,6 +406,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
                 state: state,
                 startedAt: startedAt,
                 pausedAt: pausedAt,
+                lastTransitionAt: lastTransitionAt,
                 completedAt: completedAt,
                 recurrence: recurrence
             )
@@ -426,6 +435,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(startedAt, forKey: .startedAt)
         try container.encodeIfPresent(pausedAt, forKey: .pausedAt)
+        try container.encodeIfPresent(lastTransitionAt, forKey: .lastTransitionAt)
         try container.encodeIfPresent(completedAt, forKey: .completedAt)
         try container.encodeIfPresent(deletedAt, forKey: .deletedAt)
         try container.encode(recurrence, forKey: .recurrence)
@@ -446,6 +456,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         state: TimerState,
         startedAt: Date?,
         pausedAt: Date?,
+        lastTransitionAt: Date?,
         completedAt: Date?,
         recurrence: RecurrenceRule
     ) throws {
@@ -453,6 +464,27 @@ public struct TimerItem: Codable, Equatable, Sendable {
         try validateRecurrence(recurrence)
         guard accumulatedPause.isFinite, accumulatedPause >= 0 else {
             throw TimerShapeValidationError.invalidShape
+        }
+        if let lastTransitionAt {
+            guard lastTransitionAt.timeIntervalSinceReferenceDate.isFinite else {
+                throw TimerShapeValidationError.invalidShape
+            }
+            switch state {
+            case .idle:
+                throw TimerShapeValidationError.invalidShape
+            case .running:
+                guard let startedAt, lastTransitionAt >= startedAt else {
+                    throw TimerShapeValidationError.invalidShape
+                }
+            case .paused:
+                guard let pausedAt, lastTransitionAt >= pausedAt else {
+                    throw TimerShapeValidationError.invalidShape
+                }
+            case .completed, .acknowledged, .cancelled:
+                guard let completedAt, lastTransitionAt >= completedAt else {
+                    throw TimerShapeValidationError.invalidShape
+                }
+            }
         }
 
         switch kind {
