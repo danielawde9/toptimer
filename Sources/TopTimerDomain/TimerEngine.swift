@@ -36,6 +36,7 @@ public extension TimerItem {
         guard validTimerDate(date) else {
             throw TimerTransitionError.invalidTimestamp
         }
+        try requireNotBefore(date, createdAt)
 
         switch kind {
         case .countdown:
@@ -109,6 +110,7 @@ public extension TimerItem {
         guard validTimerDate(date) else {
             throw TimerTransitionError.invalidTimestamp
         }
+        try requireNotBefore(date, createdAt)
         if let lastTransitionAt {
             try requireNotBefore(date, lastTransitionAt)
         }
@@ -176,6 +178,47 @@ public extension TimerItem {
             self.deadline = nil
         }
         state = .completed
+        pausedAt = nil
+        lastTransitionAt = date
+        completedAt = date
+        deletedAt = nil
+    }
+
+    mutating func cancel(at date: Date) throws {
+        guard validTimerDate(date) else {
+            throw TimerTransitionError.invalidTimestamp
+        }
+        guard state == .running || state == .paused else {
+            throw TimerTransitionError.invalidState
+        }
+        guard let temporalFloor = lastTransitionAt ?? pausedAt ?? startedAt else {
+            throw TimerTransitionError.invalidState
+        }
+        try requireNotBefore(date, temporalFloor)
+
+        switch kind {
+        case .countdown:
+            if state == .running {
+                guard let deadline else { throw TimerTransitionError.invalidState }
+                let liveRemaining = deadline.timeIntervalSince(date)
+                guard liveRemaining.isFinite else {
+                    throw TimerTransitionError.invalidTimestamp
+                }
+                remaining = max(0, liveRemaining)
+                self.deadline = nil
+            }
+        case .stopwatch:
+            if state == .paused {
+                guard let pausedAt else { throw TimerTransitionError.invalidState }
+                let pauseLength = date.timeIntervalSince(pausedAt)
+                let totalPause = accumulatedPause + pauseLength
+                guard totalPause.isFinite, totalPause >= accumulatedPause else {
+                    throw TimerTransitionError.invalidTimestamp
+                }
+                accumulatedPause = totalPause
+            }
+        }
+        state = .cancelled
         pausedAt = nil
         lastTransitionAt = date
         completedAt = date

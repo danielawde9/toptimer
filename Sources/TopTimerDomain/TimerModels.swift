@@ -346,6 +346,8 @@ public struct TimerItem: Codable, Equatable, Sendable {
         let pausedAt = try container.decodeIfPresent(Date.self, forKey: .pausedAt)
         let lastTransitionAt = try container.decodeIfPresent(Date.self, forKey: .lastTransitionAt)
         let completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
+        let createdAt = try container.decode(Date.self, forKey: .createdAt)
+        let deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
         let recurrence = try container.decode(RecurrenceRule.self, forKey: .recurrence)
 
         do {
@@ -358,11 +360,13 @@ public struct TimerItem: Codable, Equatable, Sendable {
                 remaining: remaining,
                 accumulatedPause: accumulatedPause,
                 deadline: deadline,
+                createdAt: createdAt,
                 state: state,
                 startedAt: startedAt,
                 pausedAt: pausedAt,
                 lastTransitionAt: lastTransitionAt,
                 completedAt: completedAt,
+                deletedAt: deletedAt,
                 recurrence: recurrence
             )
         } catch {
@@ -380,12 +384,12 @@ public struct TimerItem: Codable, Equatable, Sendable {
         self.remaining = remaining
         self.accumulatedPause = accumulatedPause
         self.deadline = deadline
-        self.createdAt = try container.decode(Date.self, forKey: .createdAt)
+        self.createdAt = createdAt
         self.startedAt = startedAt
         self.pausedAt = pausedAt
         self.lastTransitionAt = lastTransitionAt
         self.completedAt = completedAt
-        self.deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
+        self.deletedAt = deletedAt
         self.recurrence = recurrence
         self.alertName = try container.decodeIfPresent(String.self, forKey: .alertName)
         self.alertVolume = try container.decode(Double.self, forKey: .alertVolume)
@@ -403,11 +407,13 @@ public struct TimerItem: Codable, Equatable, Sendable {
                 remaining: remaining,
                 accumulatedPause: accumulatedPause,
                 deadline: deadline,
+                createdAt: createdAt,
                 state: state,
                 startedAt: startedAt,
                 pausedAt: pausedAt,
                 lastTransitionAt: lastTransitionAt,
                 completedAt: completedAt,
+                deletedAt: deletedAt,
                 recurrence: recurrence
             )
         } catch {
@@ -415,7 +421,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
                 self,
                 EncodingError.Context(
                     codingPath: encoder.codingPath,
-                    debugDescription: "Timer fields do not match bounded model invariants"
+                    debugDescription: "Timer item violates domain invariants"
                 )
             )
         }
@@ -453,39 +459,29 @@ public struct TimerItem: Codable, Equatable, Sendable {
         remaining: TimeInterval?,
         accumulatedPause: TimeInterval,
         deadline: Date?,
+        createdAt: Date,
         state: TimerState,
         startedAt: Date?,
         pausedAt: Date?,
         lastTransitionAt: Date?,
         completedAt: Date?,
+        deletedAt: Date?,
         recurrence: RecurrenceRule
     ) throws {
         try validateTimerMetadata(title: title, details: details, tags: tags)
         try validateRecurrence(recurrence)
-        guard accumulatedPause.isFinite, accumulatedPause >= 0 else {
-            throw TimerShapeValidationError.invalidShape
-        }
-        if let lastTransitionAt {
-            guard lastTransitionAt.timeIntervalSinceReferenceDate.isFinite else {
-                throw TimerShapeValidationError.invalidShape
-            }
-            switch state {
-            case .idle:
-                throw TimerShapeValidationError.invalidShape
-            case .running:
-                guard let startedAt, lastTransitionAt >= startedAt else {
-                    throw TimerShapeValidationError.invalidShape
-                }
-            case .paused:
-                guard let pausedAt, lastTransitionAt >= pausedAt else {
-                    throw TimerShapeValidationError.invalidShape
-                }
-            case .completed, .acknowledged, .cancelled:
-                guard let completedAt, lastTransitionAt >= completedAt else {
-                    throw TimerShapeValidationError.invalidShape
-                }
-            }
-        }
+        try validateChronology(
+            kind: kind,
+            state: state,
+            accumulatedPause: accumulatedPause,
+            createdAt: createdAt,
+            deadline: deadline,
+            startedAt: startedAt,
+            pausedAt: pausedAt,
+            lastTransitionAt: lastTransitionAt,
+            completedAt: completedAt,
+            deletedAt: deletedAt
+        )
 
         switch kind {
         case .countdown:
@@ -504,7 +500,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
                     throw TimerShapeValidationError.invalidShape
                 }
             case .running:
-                guard deadline != nil, startedAt != nil, pausedAt == nil, completedAt == nil else {
+                guard let deadline, let startedAt, deadline >= startedAt, pausedAt == nil, completedAt == nil else {
                     throw TimerShapeValidationError.invalidShape
                 }
             case .paused:
@@ -537,6 +533,95 @@ public struct TimerItem: Codable, Equatable, Sendable {
                 guard completedAt != nil else {
                     throw TimerShapeValidationError.invalidShape
                 }
+            }
+        }
+    }
+
+    private static func validateChronology(
+        kind: TimerKind,
+        state: TimerState,
+        accumulatedPause: TimeInterval,
+        createdAt: Date,
+        deadline: Date?,
+        startedAt: Date?,
+        pausedAt: Date?,
+        lastTransitionAt: Date?,
+        completedAt: Date?,
+        deletedAt: Date?
+    ) throws {
+        let dates = [createdAt, deadline, startedAt, pausedAt, lastTransitionAt, completedAt, deletedAt]
+        guard dates.compactMap({ $0 }).allSatisfy({ $0.timeIntervalSinceReferenceDate.isFinite }) else {
+            throw TimerShapeValidationError.invalidShape
+        }
+        guard accumulatedPause.isFinite, accumulatedPause >= 0 else {
+            throw TimerShapeValidationError.invalidShape
+        }
+        if let startedAt {
+            guard createdAt <= startedAt else { throw TimerShapeValidationError.invalidShape }
+        }
+        if let pausedAt {
+            guard let startedAt, startedAt <= pausedAt else {
+                throw TimerShapeValidationError.invalidShape
+            }
+        }
+        if let completedAt {
+            guard (startedAt ?? createdAt) <= completedAt else {
+                throw TimerShapeValidationError.invalidShape
+            }
+        }
+        if let deletedAt {
+            guard (completedAt ?? createdAt) <= deletedAt else {
+                throw TimerShapeValidationError.invalidShape
+            }
+        }
+        if let lastTransitionAt {
+            guard (startedAt ?? createdAt) <= lastTransitionAt else {
+                throw TimerShapeValidationError.invalidShape
+            }
+            switch state {
+            case .idle:
+                throw TimerShapeValidationError.invalidShape
+            case .running:
+                guard let startedAt, startedAt <= lastTransitionAt else {
+                    throw TimerShapeValidationError.invalidShape
+                }
+            case .paused:
+                guard let pausedAt, pausedAt <= lastTransitionAt else {
+                    throw TimerShapeValidationError.invalidShape
+                }
+            case .completed, .acknowledged, .cancelled:
+                guard let completedAt, completedAt <= lastTransitionAt else {
+                    throw TimerShapeValidationError.invalidShape
+                }
+            }
+        }
+
+        switch kind {
+        case .countdown:
+            guard accumulatedPause == 0 else { throw TimerShapeValidationError.invalidShape }
+        case .stopwatch:
+            guard let startedAt else {
+                guard accumulatedPause == 0 else { throw TimerShapeValidationError.invalidShape }
+                return
+            }
+            let endDate: Date?
+            switch state {
+            case .idle:
+                endDate = nil
+            case .running:
+                endDate = lastTransitionAt ?? startedAt
+            case .paused:
+                endDate = pausedAt
+            case .completed, .acknowledged, .cancelled:
+                endDate = completedAt
+            }
+            if let endDate {
+                let elapsedWallTime = endDate.timeIntervalSince(startedAt)
+                guard elapsedWallTime.isFinite, accumulatedPause <= elapsedWallTime else {
+                    throw TimerShapeValidationError.invalidShape
+                }
+            } else {
+                guard accumulatedPause == 0 else { throw TimerShapeValidationError.invalidShape }
             }
         }
     }

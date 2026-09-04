@@ -12,7 +12,7 @@ final class TimerEngineTests: XCTestCase {
 
     func testSleepDoesNotIntroduceCountdownDrift() throws {
         let start = Date(timeIntervalSince1970: 1_000)
-        var timer = try TimerItem.countdown(title: "Focus", duration: 60)
+        var timer = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: start)
         try timer.start(at: start)
 
         XCTAssertEqual(timer.remaining(at: start.addingTimeInterval(45)), 15)
@@ -21,7 +21,7 @@ final class TimerEngineTests: XCTestCase {
 
     func testPauseAndResumePreserveRemainingTime() throws {
         let start = Date(timeIntervalSince1970: 2_000)
-        var timer = try TimerItem.countdown(title: "Focus", duration: 60)
+        var timer = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: start)
         try timer.start(at: start)
         try timer.pause(at: start.addingTimeInterval(20))
         try timer.resume(at: start.addingTimeInterval(200))
@@ -180,6 +180,20 @@ final class TimerEngineTests: XCTestCase {
         try roundTrip(timer)
     }
 
+    func testCountdownRejectsBackwardCompletionAfterResume() throws {
+        let start = Date(timeIntervalSince1970: 7_775)
+        var timer = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: start)
+        try timer.start(at: start)
+        try timer.pause(at: start.addingTimeInterval(20))
+        try timer.resume(at: start.addingTimeInterval(100))
+
+        XCTAssertThrowsError(try timer.complete(at: start.addingTimeInterval(50))) { error in
+            XCTAssertEqual(error as? TimerTransitionError, .invalidTimestamp)
+        }
+        try timer.complete(at: start.addingTimeInterval(140))
+        try roundTrip(timer)
+    }
+
     func testStopwatchRejectsBackwardCompletionAfterResume() throws {
         let start = Date(timeIntervalSince1970: 7_800)
         var timer = try TimerItem.stopwatch(title: "Watch", createdAt: start)
@@ -260,5 +274,147 @@ final class TimerEngineTests: XCTestCase {
         try firstWatch.start(at: start)
         try secondWatch.start(at: start)
         XCTAssertEqual(TimerPriority.select(from: [secondWatch, firstWatch], at: start)?.id, firstID)
+    }
+
+    func testStartAndRestartRejectDatesBeforeCreationOrLastTransition() throws {
+        let created = Date(timeIntervalSince1970: 11_000)
+        var timer = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: created)
+        XCTAssertThrowsError(try timer.start(at: created.addingTimeInterval(-0.001))) { error in
+            XCTAssertEqual(error as? TimerTransitionError, .invalidTimestamp)
+        }
+        try timer.start(at: created)
+        try timer.pause(at: created.addingTimeInterval(10))
+        try timer.resume(at: created.addingTimeInterval(20))
+        XCTAssertThrowsError(try timer.restart(at: created.addingTimeInterval(19.999))) { error in
+            XCTAssertEqual(error as? TimerTransitionError, .invalidTimestamp)
+        }
+        try timer.restart(at: created.addingTimeInterval(20))
+        XCTAssertEqual(timer.lastTransitionAt, created.addingTimeInterval(20))
+        try roundTrip(timer)
+    }
+
+    func testEqualTimeTransitionsAreValid() throws {
+        let start = Date(timeIntervalSince1970: 11_500)
+        var timer = try TimerItem.countdown(title: "Focus", duration: 1, createdAt: start)
+        try timer.start(at: start)
+        try timer.pause(at: start)
+        try timer.resume(at: start)
+        XCTAssertEqual(timer.remaining(at: start), 1)
+        try timer.pause(at: start)
+        try roundTrip(timer)
+    }
+
+    func testStopwatchMultiplePauseResumeCyclesRemainAccurate() throws {
+        let start = Date(timeIntervalSince1970: 12_000)
+        var timer = try TimerItem.stopwatch(title: "Watch", createdAt: start)
+        try timer.start(at: start)
+        try timer.pause(at: start.addingTimeInterval(1.25))
+        try timer.resume(at: start.addingTimeInterval(2.50))
+        try timer.pause(at: start.addingTimeInterval(3.75))
+        try timer.resume(at: start.addingTimeInterval(4.00))
+        XCTAssertEqual(timer.elapsed(at: start.addingTimeInterval(5.50)) ?? -1, 4.00, accuracy: 0.000_001)
+        try timer.complete(at: start.addingTimeInterval(5.50))
+        XCTAssertEqual(timer.elapsed(at: start.addingTimeInterval(100)) ?? -1, 4.00, accuracy: 0.000_001)
+        try roundTrip(timer)
+    }
+
+    func testCancelIsExplicitForCountdownAndStopwatch() throws {
+        let start = Date(timeIntervalSince1970: 12_500)
+        var countdown = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: start)
+        try countdown.start(at: start)
+        try countdown.cancel(at: start.addingTimeInterval(5))
+        XCTAssertEqual(countdown.state, .cancelled)
+        XCTAssertEqual(countdown.completedAt, start.addingTimeInterval(5))
+        XCTAssertEqual(countdown.lastTransitionAt, start.addingTimeInterval(5))
+        try roundTrip(countdown)
+        XCTAssertThrowsError(try countdown.cancel(at: start.addingTimeInterval(6))) { error in
+            XCTAssertEqual(error as? TimerTransitionError, .invalidState)
+        }
+
+        var stopwatch = try TimerItem.stopwatch(title: "Watch", createdAt: start)
+        try stopwatch.start(at: start)
+        try stopwatch.cancel(at: start)
+        XCTAssertEqual(stopwatch.state, .cancelled)
+        XCTAssertEqual(stopwatch.completedAt, start)
+        try roundTrip(stopwatch)
+    }
+
+    func testPriorityCountdownPrecedesStopwatch() throws {
+        let start = Date(timeIntervalSince1970: 13_000)
+        var stopwatch = try TimerItem.stopwatch(title: "Watch", id: firstID, createdAt: start)
+        var countdown = try TimerItem.countdown(title: "Focus", duration: 60, id: secondID, createdAt: start)
+        try stopwatch.start(at: start)
+        try countdown.start(at: start)
+
+        XCTAssertEqual(TimerPriority.select(from: [stopwatch, countdown], at: start)?.id, secondID)
+    }
+
+    func testStopwatchDuplicateAndRestartStayReadyAndAccurate() throws {
+        let start = Date(timeIntervalSince1970: 13_500)
+        var timer = try TimerItem.stopwatch(title: "Watch", createdAt: start)
+        try timer.start(at: start)
+        try timer.pause(at: start.addingTimeInterval(10))
+        let duplicate = try timer.duplicate(at: start.addingTimeInterval(20))
+        XCTAssertEqual(duplicate.state, .idle)
+        XCTAssertNil(duplicate.startedAt)
+        XCTAssertNil(duplicate.lastTransitionAt)
+        XCTAssertEqual(duplicate.createdAt, start.addingTimeInterval(20))
+        try roundTrip(duplicate)
+
+        try timer.resume(at: start.addingTimeInterval(30))
+        try timer.restart(at: start.addingTimeInterval(40))
+        XCTAssertEqual(timer.state, .running)
+        XCTAssertEqual(timer.startedAt, start.addingTimeInterval(40))
+        XCTAssertEqual(timer.elapsed(at: start.addingTimeInterval(41)), 1)
+        try roundTrip(timer)
+    }
+
+    func testCorruptedChronologyAndExcessivePauseAreRejected() throws {
+        let start = Date(timeIntervalSince1970: 14_000)
+        var paused = try TimerItem.stopwatch(title: "Watch", createdAt: start)
+        try paused.start(at: start)
+        try paused.pause(at: start.addingTimeInterval(10))
+        var inverted = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(paused)) as? [String: Any]
+        )
+        let startedValue = try XCTUnwrap(inverted["startedAt"] as? NSNumber).doubleValue
+        inverted["pausedAt"] = startedValue - 1
+        inverted["lastTransitionAt"] = startedValue - 1
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            TimerItem.self,
+            from: JSONSerialization.data(withJSONObject: inverted)
+        ))
+
+        var invertedCreation = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(paused)) as? [String: Any]
+        )
+        invertedCreation["createdAt"] = startedValue + 1
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            TimerItem.self,
+            from: JSONSerialization.data(withJSONObject: invertedCreation)
+        ))
+
+        var running = try TimerItem.stopwatch(title: "Watch", createdAt: start)
+        try running.start(at: start)
+        var excessive = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(running)) as? [String: Any]
+        )
+        excessive["accumulatedPause"] = 1
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            TimerItem.self,
+            from: JSONSerialization.data(withJSONObject: excessive)
+        ))
+
+        var completed = try TimerItem.stopwatch(title: "Watch", createdAt: start)
+        try completed.start(at: start)
+        try completed.complete(at: start.addingTimeInterval(10))
+        var invertedCompletion = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(completed)) as? [String: Any]
+        )
+        invertedCompletion["completedAt"] = startedValue - 1
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            TimerItem.self,
+            from: JSONSerialization.data(withJSONObject: invertedCompletion)
+        ))
     }
 }
