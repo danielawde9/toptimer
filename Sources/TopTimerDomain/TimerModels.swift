@@ -109,6 +109,10 @@ private func validateRecurrence(_ recurrence: RecurrenceRule) throws {
     }
 }
 
+private enum TimerShapeValidationError: Error {
+    case invalidShape
+}
+
 public struct TimerItem: Codable, Equatable, Sendable {
     public let id: UUID
     public let occurrenceID: UUID
@@ -157,32 +161,6 @@ public struct TimerItem: Codable, Equatable, Sendable {
         )
     }
 
-    /// Convenience for UI entry points that intentionally start from the current clock.
-    public static func countdown(
-        title: String,
-        duration: TimeInterval,
-        details: String = "",
-        tags: [String] = [],
-        recurrence: RecurrenceRule = .none,
-        alertName: String? = nil,
-        alertVolume: Double = 1,
-        id: UUID = UUID(),
-        occurrenceID: UUID = UUID()
-    ) throws -> TimerItem {
-        try countdown(
-            title: title,
-            duration: duration,
-            details: details,
-            tags: tags,
-            recurrence: recurrence,
-            alertName: alertName,
-            alertVolume: alertVolume,
-            id: id,
-            occurrenceID: occurrenceID,
-            createdAt: .now
-        )
-    }
-
     public static func stopwatch(
         title: String,
         details: String = "",
@@ -206,30 +184,6 @@ public struct TimerItem: Codable, Equatable, Sendable {
             recurrence: recurrence,
             alertName: alertName,
             alertVolume: alertVolume
-        )
-    }
-
-    /// Convenience for UI entry points that intentionally start from the current clock.
-    public static func stopwatch(
-        title: String,
-        details: String = "",
-        tags: [String] = [],
-        recurrence: RecurrenceRule = .none,
-        alertName: String? = nil,
-        alertVolume: Double = 1,
-        id: UUID = UUID(),
-        occurrenceID: UUID = UUID()
-    ) throws -> TimerItem {
-        try stopwatch(
-            title: title,
-            details: details,
-            tags: tags,
-            recurrence: recurrence,
-            alertName: alertName,
-            alertVolume: alertVolume,
-            id: id,
-            occurrenceID: occurrenceID,
-            createdAt: .now
         )
     }
 
@@ -320,6 +274,9 @@ public struct TimerItem: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let title = try container.decode(String.self, forKey: .title)
+        let details = try container.decode(String.self, forKey: .details)
+        let tags = try container.decode([String].self, forKey: .tags)
         let kind = try container.decode(TimerKind.self, forKey: .kind)
         let duration = try container.decodeIfPresent(TimeInterval.self, forKey: .duration)
         let remaining = try container.decodeIfPresent(TimeInterval.self, forKey: .remaining)
@@ -331,34 +288,29 @@ public struct TimerItem: Codable, Equatable, Sendable {
         let recurrence = try container.decode(RecurrenceRule.self, forKey: .recurrence)
 
         do {
-            try validateTimerMetadata(
-                title: container.decode(String.self, forKey: .title),
-                details: container.decode(String.self, forKey: .details),
-                tags: container.decode([String].self, forKey: .tags)
+            try Self.validateFullShape(
+                title: title,
+                details: details,
+                tags: tags,
+                kind: kind,
+                duration: duration,
+                remaining: remaining,
+                deadline: deadline,
+                state: state,
+                startedAt: startedAt,
+                pausedAt: pausedAt,
+                completedAt: completedAt,
+                recurrence: recurrence
             )
-            try validateRecurrence(recurrence)
         } catch {
             throw Self.corrupted(decoder, reason: "Invalid timer metadata or recurrence")
         }
 
-        guard Self.hasValidPersistedShape(
-            kind: kind,
-            duration: duration,
-            remaining: remaining,
-            deadline: deadline,
-            state: state,
-            startedAt: startedAt,
-            pausedAt: pausedAt,
-            completedAt: completedAt
-        ) else {
-            throw Self.corrupted(decoder, reason: "Timer fields do not match kind and state")
-        }
-
         self.id = try container.decode(UUID.self, forKey: .id)
         self.occurrenceID = try container.decode(UUID.self, forKey: .occurrenceID)
-        self.title = try container.decode(String.self, forKey: .title)
-        self.details = try container.decode(String.self, forKey: .details)
-        self.tags = try container.decode([String].self, forKey: .tags)
+        self.title = title
+        self.details = details
+        self.tags = tags
         self.kind = kind
         self.state = state
         self.duration = duration
@@ -375,7 +327,58 @@ public struct TimerItem: Codable, Equatable, Sendable {
         self.successorID = try container.decodeIfPresent(UUID.self, forKey: .successorID)
     }
 
-    private static func hasValidPersistedShape(
+    public func encode(to encoder: Encoder) throws {
+        do {
+            try Self.validateFullShape(
+                title: title,
+                details: details,
+                tags: tags,
+                kind: kind,
+                duration: duration,
+                remaining: remaining,
+                deadline: deadline,
+                state: state,
+                startedAt: startedAt,
+                pausedAt: pausedAt,
+                completedAt: completedAt,
+                recurrence: recurrence
+            )
+        } catch {
+            throw EncodingError.invalidValue(
+                self,
+                EncodingError.Context(
+                    codingPath: encoder.codingPath,
+                    debugDescription: "Timer fields do not match bounded model invariants"
+                )
+            )
+        }
+
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(occurrenceID, forKey: .occurrenceID)
+        try container.encode(title, forKey: .title)
+        try container.encode(details, forKey: .details)
+        try container.encode(tags, forKey: .tags)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(state, forKey: .state)
+        try container.encodeIfPresent(duration, forKey: .duration)
+        try container.encodeIfPresent(remaining, forKey: .remaining)
+        try container.encodeIfPresent(deadline, forKey: .deadline)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(startedAt, forKey: .startedAt)
+        try container.encodeIfPresent(pausedAt, forKey: .pausedAt)
+        try container.encodeIfPresent(completedAt, forKey: .completedAt)
+        try container.encodeIfPresent(deletedAt, forKey: .deletedAt)
+        try container.encode(recurrence, forKey: .recurrence)
+        try container.encodeIfPresent(alertName, forKey: .alertName)
+        try container.encode(alertVolume, forKey: .alertVolume)
+        try container.encodeIfPresent(successorID, forKey: .successorID)
+    }
+
+    private static func validateFullShape(
+        title: String,
+        details: String,
+        tags: [String],
         kind: TimerKind,
         duration: TimeInterval?,
         remaining: TimeInterval?,
@@ -383,35 +386,59 @@ public struct TimerItem: Codable, Equatable, Sendable {
         state: TimerState,
         startedAt: Date?,
         pausedAt: Date?,
-        completedAt: Date?
-    ) -> Bool {
+        completedAt: Date?,
+        recurrence: RecurrenceRule
+    ) throws {
+        try validateTimerMetadata(title: title, details: details, tags: tags)
+        try validateRecurrence(recurrence)
+
         switch kind {
         case .countdown:
-            guard let duration, duration.isFinite, duration > 0 else { return false }
+            guard let duration, duration.isFinite, duration > 0 else {
+                throw TimerShapeValidationError.invalidShape
+            }
             if let remaining, (!remaining.isFinite || remaining < 0 || remaining > duration) {
-                return false
+                throw TimerShapeValidationError.invalidShape
             }
             switch state {
             case .idle:
-                return remaining != nil && deadline == nil && startedAt == nil && pausedAt == nil && completedAt == nil
+                guard remaining != nil, deadline == nil, startedAt == nil, pausedAt == nil, completedAt == nil else {
+                    throw TimerShapeValidationError.invalidShape
+                }
             case .running:
-                return deadline != nil && startedAt != nil && pausedAt == nil && completedAt == nil
+                guard deadline != nil, startedAt != nil, pausedAt == nil, completedAt == nil else {
+                    throw TimerShapeValidationError.invalidShape
+                }
             case .paused:
-                return remaining != nil && deadline == nil && startedAt != nil && pausedAt != nil && completedAt == nil
+                guard remaining != nil, deadline == nil, startedAt != nil, pausedAt != nil, completedAt == nil else {
+                    throw TimerShapeValidationError.invalidShape
+                }
             case .completed, .acknowledged, .cancelled:
-                return completedAt != nil
+                guard completedAt != nil else {
+                    throw TimerShapeValidationError.invalidShape
+                }
             }
         case .stopwatch:
-            guard duration == nil, remaining == nil, deadline == nil else { return false }
+            guard duration == nil, remaining == nil, deadline == nil else {
+                throw TimerShapeValidationError.invalidShape
+            }
             switch state {
             case .idle:
-                return startedAt == nil && pausedAt == nil && completedAt == nil
+                guard startedAt == nil, pausedAt == nil, completedAt == nil else {
+                    throw TimerShapeValidationError.invalidShape
+                }
             case .running:
-                return startedAt != nil && pausedAt == nil && completedAt == nil
+                guard startedAt != nil, pausedAt == nil, completedAt == nil else {
+                    throw TimerShapeValidationError.invalidShape
+                }
             case .paused:
-                return startedAt != nil && pausedAt != nil && completedAt == nil
+                guard startedAt != nil, pausedAt != nil, completedAt == nil else {
+                    throw TimerShapeValidationError.invalidShape
+                }
             case .completed, .acknowledged, .cancelled:
-                return completedAt != nil
+                guard completedAt != nil else {
+                    throw TimerShapeValidationError.invalidShape
+                }
             }
         }
     }

@@ -170,6 +170,19 @@ final class TimerModelsTests: XCTestCase {
         }
     }
 
+    func testMalformedInternalStateCannotBeEncoded() throws {
+        let date = Date(timeIntervalSince1970: 1_000)
+        var item = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: date)
+        item.state = .running
+        item.startedAt = date
+
+        XCTAssertThrowsError(try JSONEncoder().encode(item)) { error in
+            guard case EncodingError.invalidValue = error else {
+                return XCTFail("Expected invalidValue, got \(error)")
+            }
+        }
+    }
+
     func testPersistedRunningAndPausedShapesAreAcceptedOnlyWhenCoherent() throws {
         let date = Date(timeIntervalSince1970: 1_000)
         var running = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: date)
@@ -183,10 +196,10 @@ final class TimerModelsTests: XCTestCase {
         var malformedRunning = running
         malformedRunning.startedAt = nil
         XCTAssertThrowsError(
-            try JSONDecoder().decode(TimerItem.self, from: JSONEncoder().encode(malformedRunning))
+            try JSONEncoder().encode(malformedRunning)
         ) { error in
-            guard case DecodingError.dataCorrupted = error else {
-                return XCTFail("Expected dataCorrupted, got \(error)")
+            guard case EncodingError.invalidValue = error else {
+                return XCTFail("Expected invalidValue, got \(error)")
             }
         }
 
