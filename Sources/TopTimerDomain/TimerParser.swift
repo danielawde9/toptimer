@@ -20,20 +20,6 @@ public struct ParsedTimer: Equatable, Sendable {
     public let deadline: Date?
     public let title: String
     public let tags: [String]
-
-    public init(
-        kind: TimerKind,
-        duration: TimeInterval?,
-        deadline: Date?,
-        title: String,
-        tags: [String]
-    ) {
-        self.kind = kind
-        self.duration = duration
-        self.deadline = deadline
-        self.title = title
-        self.tags = tags
-    }
 }
 
 public struct TimerParser: Sendable {
@@ -49,7 +35,8 @@ public struct TimerParser: Sendable {
     }
 
     public func parse(_ input: String) throws -> ParsedTimer {
-        guard input.unicodeScalars.count <= Self.maxInputScalars else {
+        let scalarCount = input.unicodeScalars.prefix(Self.maxInputScalars + 1).count
+        guard scalarCount <= Self.maxInputScalars else {
             throw TimerParserError.inputTooLong
         }
 
@@ -242,26 +229,31 @@ public struct TimerParser: Sendable {
         guard parts.count == 2 || parts.count == 3 else {
             throw TimerParserError.invalidFormat
         }
-        let values = try parts.map(parseUnsignedInteger)
+        let values = try parts.map { try parseUnsignedInteger($0) }
         if values.count == 2 {
-            guard values[1] < 60 else { throw TimerParserError.invalidWallClock }
+            guard values[1] < 60 else { throw TimerParserError.invalidFormat }
             let seconds = TimeInterval(values[0]) * 60 + TimeInterval(values[1])
             return try checkedDuration(seconds)
         }
         guard values[1] < 60, values[2] < 60 else {
-            throw TimerParserError.invalidWallClock
+            throw TimerParserError.invalidFormat
         }
-        let seconds = TimeInterval(values[0]) * 3_600 + TimeInterval(values[1]) * 60 + TimeInterval(values[2])
+        let hours = TimeInterval(values[0]) * 3_600
+        let minutes = TimeInterval(values[1]) * 60
+        let seconds = hours + minutes + TimeInterval(values[2])
         return try checkedDuration(seconds)
     }
 
-    private func parseUnsignedInteger(_ value: Substring) throws -> Int {
+    private func parseUnsignedInteger(
+        _ value: Substring,
+        overflowError: TimerParserError = .durationTooLong
+    ) throws -> Int {
         guard !value.isEmpty else { throw TimerParserError.invalidNumber }
         guard value.allSatisfy({ $0.isASCII && $0.isNumber }) else {
             if value.first == "-" { throw TimerParserError.negativeValue }
             throw TimerParserError.invalidNumber
         }
-        guard let result = Int(value) else { throw TimerParserError.durationTooLong }
+        guard let result = Int(value) else { throw overflowError }
         return result
     }
 
@@ -284,7 +276,7 @@ public struct TimerParser: Sendable {
         guard parts.count == 1 || parts.count == 2 else {
             throw TimerParserError.invalidWallClock
         }
-        let values = try parts.map(parseUnsignedInteger)
+        let values = try parts.map { try parseUnsignedInteger($0, overflowError: .invalidWallClock) }
         let hour: Int
         let minute: Int
         if values.count == 1 {
@@ -308,18 +300,15 @@ public struct TimerParser: Sendable {
             normalizedHour = hour
         }
 
-        var components = calendar.dateComponents([.year, .month, .day], from: now)
-        components.hour = normalizedHour
-        components.minute = minute
-        components.second = 0
-        guard var deadline = calendar.date(from: components) else {
+        let matchingComponents = DateComponents(hour: normalizedHour, minute: minute, second: 0)
+        guard let deadline = calendar.nextDate(
+            after: now,
+            matching: matchingComponents,
+            matchingPolicy: .nextTime,
+            repeatedTimePolicy: .first,
+            direction: .forward
+        ) else {
             throw TimerParserError.invalidWallClock
-        }
-        if deadline <= now {
-            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: deadline) else {
-                throw TimerParserError.invalidWallClock
-            }
-            deadline = nextDay
         }
         let duration = deadline.timeIntervalSince(now)
         guard duration.isFinite, duration > 0, duration <= Self.maxDuration else {

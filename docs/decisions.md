@@ -75,3 +75,18 @@ notifications, and exports predictable.
 
 **If the client answers differently:** The limits can be raised with matching UI,
 storage, notification truncation, and export tests.
+
+## 2026-09-04 — Wall-clock DST parsing
+
+**Decision:** Nonexistent local wall-clock times entered with `@` advance to the
+next valid local time (for example, 2:30 during the spring-forward gap becomes
+3:00). Repeated local times prefer the first occurrence that is still later than
+now.
+
+**Why:** This gives users a predictable next alarm and keeps wall-clock parsing
+aligned with the recurrence scheduler's forward, next-occurrence behavior.
+
+**If the client answers differently:** Rejecting nonexistent times would require
+a validation error and UI correction; advancing to the next day would change the
+alarm's date; preferring the second repeated occurrence would change the fold
+selection and elapsed duration.

@@ -44,6 +44,25 @@ final class TimerParserTests: XCTestCase {
         }
     }
 
+    func testInputBoundaryUsesUnicodeScalars() throws {
+        let parser = TimerParser(calendar: utcCalendar, now: fixedNow)
+        let accepted = String(repeating: " ", count: 2_048)
+        XCTAssertEqual(try parser.parse(accepted).kind, .stopwatch)
+
+        let composed = String(repeating: "e\u{301}", count: 1_024)
+        XCTAssertEqual(composed.count, 1_024)
+        XCTAssertEqual(composed.unicodeScalars.count, 2_048)
+        XCTAssertThrowsError(try parser.parse(composed)) { error in
+            XCTAssertNotEqual(error as? TimerParserError, .inputTooLong)
+        }
+
+        let overLimit = composed + "x"
+        XCTAssertEqual(overLimit.unicodeScalars.count, 2_049)
+        XCTAssertThrowsError(try parser.parse(overLimit)) { error in
+            XCTAssertEqual(error as? TimerParserError, .inputTooLong)
+        }
+    }
+
     func testParsesWallClockAndRollsOverToTheNextDay() throws {
         let parser = TimerParser(calendar: utcCalendar, now: fixedNow)
         let sameDay = try parser.parse("@3pm Design review")
@@ -69,6 +88,34 @@ final class TimerParserTests: XCTestCase {
         XCTAssertEqual(noon.deadline, utcCalendar.date(from: DateComponents(year: 2026, month: 1, day: 16, hour: 12))!)
         XCTAssertEqual(midnight.deadline, utcCalendar.date(from: DateComponents(year: 2026, month: 1, day: 16))!)
         XCTAssertEqual(twentyFourHour.deadline, utcCalendar.date(from: DateComponents(year: 2026, month: 1, day: 15, hour: 14, minute: 30))!)
+    }
+
+    func testWallClockUsesNextTimeForSpringForwardGap() throws {
+        var calendar = utcCalendar
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 8, hour: 1, minute: 59))!
+        let parsed = try TimerParser(calendar: calendar, now: now).parse("@2:30am")
+
+        XCTAssertEqual(parsed.deadline, Date(timeIntervalSince1970: 1_772_953_200))
+        XCTAssertEqual(parsed.duration, 60)
+    }
+
+    func testWallClockUsesFirstOccurrenceForFallBackFold() throws {
+        var calendar = utcCalendar
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 0, minute: 30))!
+        let parsed = try TimerParser(calendar: calendar, now: now).parse("@1:30am")
+
+        XCTAssertEqual(parsed.deadline, Date(timeIntervalSince1970: 1_793_511_000))
+        XCTAssertEqual(parsed.duration, 3_600)
+    }
+
+    func testRejectsOverflowingWallClockIntegerAsInvalidWallClock() {
+        let parser = TimerParser(calendar: utcCalendar, now: fixedNow)
+
+        XCTAssertThrowsError(try parser.parse("@999999999999999999999")) { error in
+            XCTAssertEqual(error as? TimerParserError, .invalidWallClock)
+        }
     }
 
     func testPreservesApostrophesAndMixedScriptTitles() throws {
@@ -100,7 +147,8 @@ final class TimerParserTests: XCTestCase {
             ("0", .nonPositiveDuration),
             ("NaNh", .nonFiniteValue),
             ("1e400h", .nonFiniteValue),
-            ("366d", .durationTooLong)
+            ("366d", .durationTooLong),
+            ("1:60", .invalidFormat)
         ]
 
         for (input, expectedError) in cases {
@@ -108,6 +156,7 @@ final class TimerParserTests: XCTestCase {
                 XCTAssertEqual(error as? TimerParserError, expectedError, input)
             }
         }
+        XCTAssertEqual(try? parser.parse("365d").duration, 365 * 24 * 60 * 60)
     }
 
     func testRejectsMalformedTagsInsteadOfDroppingThem() {
