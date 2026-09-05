@@ -1,0 +1,122 @@
+@preconcurrency import CoreData
+import Foundation
+
+@objc(TimerRecord)
+final class TimerRecord: NSManagedObject {
+    @NSManaged var id: UUID
+    @NSManaged var occurrenceID: UUID
+    @NSManaged var predecessorOccurrenceID: UUID?
+    @NSManaged var predecessorKey: String?
+    @NSManaged var state: String
+    @NSManaged var deadline: Date?
+    @NSManaged var createdAt: Date
+    @NSManaged var completedAt: Date?
+    @NSManaged var deletedAt: Date?
+    @NSManaged var payload: Data
+}
+
+@objc(HistoryRecord)
+final class HistoryRecord: NSManagedObject {
+    @NSManaged var id: UUID
+    @NSManaged var timerID: UUID
+    @NSManaged var occurrenceID: UUID
+    @NSManaged var endedAt: Date
+    @NSManaged var deletedAt: Date?
+    @NSManaged var payload: Data
+}
+
+@objc(PresetRecord)
+final class PresetRecord: NSManagedObject {
+    @NSManaged var id: UUID
+    @NSManaged var createdAt: Date
+    @NSManaged var deletedAt: Date?
+    @NSManaged var payload: Data
+}
+
+enum TopTimerCoreDataModel {
+    static let model: NSManagedObjectModel = {
+        let model = NSManagedObjectModel()
+        model.entities = [timerEntity(), historyEntity(), presetEntity()]
+        return model
+    }()
+
+    private static func timerEntity() -> NSEntityDescription {
+        let entity = NSEntityDescription()
+        entity.name = "TimerRecord"
+        entity.managedObjectClassName = NSStringFromClass(TimerRecord.self)
+        entity.properties = [
+            attribute("id", .UUIDAttributeType, optional: false, indexed: true),
+            attribute("occurrenceID", .UUIDAttributeType, optional: false, indexed: true),
+            attribute("predecessorOccurrenceID", .UUIDAttributeType, optional: true, indexed: true),
+            attribute("predecessorKey", .stringAttributeType, optional: true, indexed: true),
+            attribute("state", .stringAttributeType, optional: false, indexed: true),
+            attribute("deadline", .dateAttributeType, optional: true, indexed: true),
+            attribute("createdAt", .dateAttributeType, optional: false, indexed: true),
+            attribute("completedAt", .dateAttributeType, optional: true, indexed: true),
+            attribute("deletedAt", .dateAttributeType, optional: true, indexed: true),
+            attribute("payload", .binaryDataAttributeType, optional: false, indexed: false)
+        ]
+        entity.uniquenessConstraints = [["id"], ["occurrenceID"], ["predecessorKey"]]
+        entity.indexes = [index("timer_active", entity, ["state", "deadline", "createdAt", "deletedAt"])]
+        return entity
+    }
+
+    private static func historyEntity() -> NSEntityDescription {
+        let entity = NSEntityDescription()
+        entity.name = "HistoryRecord"
+        entity.managedObjectClassName = NSStringFromClass(HistoryRecord.self)
+        entity.properties = [
+            attribute("id", .UUIDAttributeType, optional: false, indexed: true),
+            attribute("timerID", .UUIDAttributeType, optional: false, indexed: true),
+            attribute("occurrenceID", .UUIDAttributeType, optional: false, indexed: true),
+            attribute("endedAt", .dateAttributeType, optional: false, indexed: true),
+            attribute("deletedAt", .dateAttributeType, optional: true, indexed: true),
+            attribute("payload", .binaryDataAttributeType, optional: false, indexed: false)
+        ]
+        entity.uniquenessConstraints = [["id"], ["occurrenceID"]]
+        entity.indexes = [index("history_timeline", entity, ["timerID", "endedAt", "deletedAt"])]
+        return entity
+    }
+
+    private static func presetEntity() -> NSEntityDescription {
+        let entity = NSEntityDescription()
+        entity.name = "PresetRecord"
+        entity.managedObjectClassName = NSStringFromClass(PresetRecord.self)
+        entity.properties = [
+            attribute("id", .UUIDAttributeType, optional: false, indexed: true),
+            attribute("createdAt", .dateAttributeType, optional: false, indexed: true),
+            attribute("deletedAt", .dateAttributeType, optional: true, indexed: true),
+            attribute("payload", .binaryDataAttributeType, optional: false, indexed: false)
+        ]
+        entity.uniquenessConstraints = [["id"]]
+        entity.indexes = [index("preset_recovery", entity, ["createdAt", "deletedAt"])]
+        return entity
+    }
+
+    private static func attribute(
+        _ name: String,
+        _ type: NSAttributeType,
+        optional: Bool,
+        indexed: Bool
+    ) -> NSAttributeDescription {
+        let attribute = NSAttributeDescription()
+        attribute.name = name
+        attribute.attributeType = type
+        attribute.isOptional = optional
+        _ = indexed
+        return attribute
+    }
+
+    private static func index(
+        _ name: String,
+        _ entity: NSEntityDescription,
+        _ propertyNames: [String]
+    ) -> NSFetchIndexDescription {
+        let elements = propertyNames.compactMap { propertyName in
+            entity.propertiesByName[propertyName].map {
+                NSFetchIndexElementDescription(property: $0, collationType: .binary)
+            }
+        }
+        return NSFetchIndexDescription(name: name, elements: elements)
+    }
+}

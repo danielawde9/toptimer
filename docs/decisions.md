@@ -139,3 +139,14 @@ consistent.
 **If the client answers differently:** A separate stopwatch control could be
 added, but it would make the compact popover denser and split equivalent creation
 behavior across two actions.
+
+## 2026-09-05 — Persistence payload version one
+
+**Decision:** Persist timer and history payloads in a version-one JSON envelope;
+selected recurrence weekdays are sorted before storage.
+
+**Why:** A version gate makes incompatible future schemas fail loudly, and sorted
+weekday values make the otherwise unordered set stable for backups and tests.
+
+**If the client answers differently:** A requested migration policy would add a
+new decoder/migration path while retaining the existing version-one reader.
