@@ -199,3 +199,18 @@ successor or its history entry.
 
 **If the client answers differently:** Allowing terminal restarts through a
 generic update needs a separate explicit transition API and concurrency policy.
+
+## 2026-09-05 — Bounded history reports and CSV tag representation
+
+**Decision:** History analytics reject more than 10,000 already-fetched entries.
+Repository history pages and each cleanup pass are capped at 200 records. CSV
+uses the stable RFC 4180 column order and sorts tags before joining them with
+`|`; each row is UTF-8 text terminated with CRLF.
+
+**Why:** Reports must not build unbounded in-memory collections, recovery and
+retention work must have a bounded transaction, and sorted tag output makes a
+given record export reproducibly.
+
+**If the client answers differently:** Larger reports or retention batches need
+cursor-driven aggregation/cleanup, and a different tag encoding needs a new
+documented CSV contract for importers.

@@ -633,9 +633,110 @@ final class TimerRepositoryTests: XCTestCase {
         _ = try await repository.complete(timer.id, at: completed)
         _ = try await repository.cancel(id: timer.id, at: completed)
         try await repository.softDelete(timer.id, at: completed)
+        _ = try await repository.historyPage(from: nil, through: nil, query: "", limit: 1, after: nil)
+        try await repository.updateHistory(try historyEntry(id: "00000000-0000-0000-0000-000000000099", title: "History"))
+        try await repository.softDeleteHistory(timer.id, at: completed)
+        try await repository.recoverHistory(timer.id)
+        _ = try await repository.purgeHistory(endedBefore: completed)
         _ = try await repository.historyCount(for: timer.id, limit: 1)
         _ = try await repository.successors(of: timer.occurrenceID, limit: 1)
         _ = try await repository.timer(id: timer.id)
+    }
+
+    func testHistoryPageUsesDateBoundsSearchAndDescendingCursorTies() async throws {
+        let repository = try await repository()
+        let ended = completed
+        let first = try historyEntry(id: "00000000-0000-0000-0000-000000000001", title: "Other", endedAt: ended)
+        let second = try historyEntry(id: "00000000-0000-0000-0000-000000000002", title: "Focus", details: "CLIENT notes", endedAt: ended)
+        let third = try historyEntry(id: "00000000-0000-0000-0000-000000000003", title: "Focus", tags: ["client-work"], endedAt: ended)
+        let outside = try historyEntry(id: "00000000-0000-0000-0000-000000000004", title: "CLIENT old", endedAt: created)
+        for entry in [first, second, third, outside] {
+            try await repository.insertHistory(entry)
+        }
+
+        let firstPage = try await repository.historyPage(
+            from: ended,
+            through: ended,
+            query: "client",
+            limit: 2,
+            after: nil
+        )
+        XCTAssertEqual(firstPage.entries.map(\.id), [third.id, second.id])
+        XCTAssertEqual(firstPage.nextCursor, HistoryPageCursor(endedAt: ended, id: second.id))
+
+        let secondPage = try await repository.historyPage(
+            from: ended,
+            through: ended,
+            query: "client",
+            limit: 2,
+            after: firstPage.nextCursor
+        )
+        XCTAssertEqual(secondPage.entries, [])
+        XCTAssertNil(secondPage.nextCursor)
+    }
+
+    func testHistoryPageClampsLimitsAndSearchesDecodedTagValuesCaseInsensitively() async throws {
+        let repository = try await repository()
+        let first = try historyEntry(id: "00000000-0000-0000-0000-000000000001", title: "First", tags: ["CLIENT"])
+        let second = try historyEntry(id: "00000000-0000-0000-0000-000000000002", title: "Second", tags: ["client"])
+        try await repository.insertHistory(first)
+        try await repository.insertHistory(second)
+
+        let page = try await repository.historyPage(from: nil, through: nil, query: "ClIeNt", limit: 0, after: nil)
+
+        XCTAssertEqual(page.entries.map(\.id), [second.id])
+        XCTAssertEqual(page.nextCursor, HistoryPageCursor(endedAt: second.endedAt, id: second.id))
+    }
+
+    func testHistoryMetadataEditPreservesIdentityAndSystemTimestamps() async throws {
+        let repository = try await repository()
+        let original = try historyEntry(id: "00000000-0000-0000-0000-000000000001", title: "Original")
+        try await repository.insertHistory(original)
+        var edited = original
+        try edited.updateMetadata(title: "Edited", details: "Details", tags: ["work"])
+
+        try await repository.updateHistory(edited)
+        let savedPage = try await repository.historyPage(from: nil, through: nil, query: "", limit: 1, after: nil)
+        let saved = try XCTUnwrap(savedPage.entries.first)
+        XCTAssertEqual(saved, edited)
+
+        let changedTimestamp = try HistoryEntry(
+            id: edited.id,
+            timerID: edited.timerID,
+            occurrenceID: edited.occurrenceID,
+            title: edited.title,
+            details: edited.details,
+            tags: edited.tags,
+            kind: edited.kind,
+            startedAt: edited.startedAt,
+            endedAt: edited.endedAt.addingTimeInterval(1),
+            elapsedSeconds: edited.elapsedSeconds,
+            completionReason: edited.completionReason
+        )
+        await XCTAssertThrowsErrorAsync({ try await repository.updateHistory(changedTimestamp) }, matching: .staleHistoryUpdate)
+        let unchangedPage = try await repository.historyPage(from: nil, through: nil, query: "", limit: 1, after: nil)
+        XCTAssertEqual(try XCTUnwrap(unchangedPage.entries.first), edited)
+    }
+
+    func testHistorySoftDeleteRecoveryAndRetentionCleanupRespectCutoff() async throws {
+        let repository = try await repository()
+        let old = try historyEntry(id: "00000000-0000-0000-0000-000000000001", title: "Old", endedAt: created)
+        let cutoff = completed
+        let atCutoff = try historyEntry(id: "00000000-0000-0000-0000-000000000002", title: "At cutoff", endedAt: cutoff)
+        try await repository.insertHistory(old)
+        try await repository.insertHistory(atCutoff)
+
+        try await repository.softDeleteHistory(atCutoff.id, at: completed)
+        let deletedPage = try await repository.historyPage(from: nil, through: nil, query: "", limit: 10, after: nil)
+        XCTAssertEqual(deletedPage.entries, [old])
+        try await repository.recoverHistory(atCutoff.id)
+        let recoveredPage = try await repository.historyPage(from: nil, through: nil, query: "", limit: 10, after: nil)
+        XCTAssertEqual(recoveredPage.entries.map(\.id), [atCutoff.id, old.id])
+
+        let purgedCount = try await repository.purgeHistory(endedBefore: cutoff)
+        XCTAssertEqual(purgedCount, 1)
+        let remainingPage = try await repository.historyPage(from: nil, through: nil, query: "", limit: 10, after: nil)
+        XCTAssertEqual(remainingPage.entries, [atCutoff])
     }
 
     private var utcCalendar: Calendar {
@@ -671,6 +772,29 @@ final class TimerRepositoryTests: XCTestCase {
             id: id,
             occurrenceID: occurrenceID,
             createdAt: created
+        )
+    }
+
+    private func historyEntry(
+        id: String,
+        title: String,
+        details: String = "",
+        tags: [String] = [],
+        endedAt: Date? = nil
+    ) throws -> HistoryEntry {
+        let value = try XCTUnwrap(UUID(uuidString: id))
+        return try HistoryEntry(
+            id: value,
+            timerID: UUID(),
+            occurrenceID: UUID(),
+            title: title,
+            details: details,
+            tags: tags,
+            kind: .countdown,
+            startedAt: created,
+            endedAt: endedAt ?? completed,
+            elapsedSeconds: 60,
+            completionReason: .finished
         )
     }
 
@@ -813,6 +937,24 @@ private actor ProtocolRepositoryFake: TimerRepository {
     }
 
     func softDelete(_ id: UUID, at date: Date) async throws {}
+
+    func historyPage(
+        from: Date?,
+        through: Date?,
+        query: String,
+        limit: Int,
+        after cursor: HistoryPageCursor?
+    ) async throws -> HistoryPage {
+        HistoryPage(entries: [], nextCursor: nil)
+    }
+
+    func updateHistory(_ history: HistoryEntry) async throws {}
+
+    func softDeleteHistory(_ id: UUID, at date: Date) async throws {}
+
+    func recoverHistory(_ id: UUID) async throws {}
+
+    func purgeHistory(endedBefore cutoff: Date) async throws -> Int { 0 }
 
     func activePage(limit: Int, after cursor: TimerPageCursor?) async throws -> TimerPage {
         TimerPage(timers: [], nextCursor: nil)

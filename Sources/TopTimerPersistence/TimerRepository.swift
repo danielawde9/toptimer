@@ -8,6 +8,7 @@ public enum TimerRepositoryError: Error, Equatable, Sendable {
     case unsupportedPayloadVersion(Int)
     case malformedPayload
     case staleTimerUpdate
+    case staleHistoryUpdate
 }
 
 public protocol TimerRepository: Sendable {
@@ -18,6 +19,11 @@ public protocol TimerRepository: Sendable {
     func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome
     func cancel(id: UUID, at date: Date) async throws -> TimerItem
     func softDelete(_ id: UUID, at date: Date) async throws
+    func historyPage(from: Date?, through: Date?, query: String, limit: Int, after cursor: HistoryPageCursor?) async throws -> HistoryPage
+    func updateHistory(_ history: HistoryEntry) async throws
+    func softDeleteHistory(_ id: UUID, at date: Date) async throws
+    func recoverHistory(_ id: UUID) async throws
+    func purgeHistory(endedBefore cutoff: Date) async throws -> Int
     func historyCount(for timerID: UUID, limit: Int) async throws -> Int
     func successors(of occurrenceID: UUID, limit: Int) async throws -> [TimerItem]
     func timer(id: UUID) async throws -> TimerItem
@@ -39,6 +45,26 @@ public struct TimerPage: Equatable, Sendable {
 
     public init(timers: [TimerItem], nextCursor: TimerPageCursor?) {
         self.timers = timers
+        self.nextCursor = nextCursor
+    }
+}
+
+public struct HistoryPageCursor: Codable, Equatable, Sendable {
+    public let endedAt: Date
+    public let id: UUID
+
+    public init(endedAt: Date, id: UUID) {
+        self.endedAt = endedAt
+        self.id = id
+    }
+}
+
+public struct HistoryPage: Equatable, Sendable {
+    public let entries: [HistoryEntry]
+    public let nextCursor: HistoryPageCursor?
+
+    public init(entries: [HistoryEntry], nextCursor: HistoryPageCursor?) {
+        self.entries = entries
         self.nextCursor = nextCursor
     }
 }
@@ -297,6 +323,96 @@ public actor TimerCoreDataRepository: TimerRepository {
         }
     }
 
+    public func historyPage(
+        from: Date?,
+        through: Date?,
+        query: String,
+        limit: Int,
+        after cursor: HistoryPageCursor? = nil
+    ) async throws -> HistoryPage {
+        let limit = Self.boundedLimit(limit)
+        return try await store.perform { context in
+            let request = NSFetchRequest<HistoryRecord>(entityName: "HistoryRecord")
+            let range = Self.historyRangePredicate(from: from, through: through, excludingDeleted: true)
+            if let cursor {
+                let after = NSPredicate(
+                    format: "endedAt < %@ OR (endedAt == %@ AND id < %@)",
+                    cursor.endedAt as NSDate, cursor.endedAt as NSDate, cursor.id as NSUUID
+                )
+                request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [range, after])
+            } else {
+                request.predicate = range
+            }
+            request.sortDescriptors = [
+                NSSortDescriptor(key: "endedAt", ascending: false),
+                NSSortDescriptor(key: "id", ascending: false)
+            ]
+            request.fetchLimit = limit
+            let records = try context.fetch(request)
+            let entries = try records.map { try TimerPayloadCodec.decodeHistory($0.payload) }
+            let matches = entries.filter { Self.matchesSearch($0, query: query) }
+            let nextCursor = try records.last.flatMap { last in
+                let probe = NSFetchRequest<NSManagedObjectID>(entityName: "HistoryRecord")
+                let after = NSPredicate(
+                    format: "endedAt < %@ OR (endedAt == %@ AND id < %@)",
+                    last.endedAt as NSDate, last.endedAt as NSDate, last.id as NSUUID
+                )
+                probe.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [range, after])
+                probe.sortDescriptors = request.sortDescriptors
+                probe.fetchLimit = 1
+                probe.resultType = .managedObjectIDResultType
+                return try context.fetch(probe).isEmpty ? nil : HistoryPageCursor(endedAt: last.endedAt, id: last.id)
+            }
+            return HistoryPage(entries: matches, nextCursor: nextCursor)
+        }
+    }
+
+    public func updateHistory(_ history: HistoryEntry) async throws {
+        try await store.perform { context in
+            do {
+                let record = try Self.historyRecord(id: history.id, in: context)
+                let stored = try TimerPayloadCodec.decodeHistory(record.payload)
+                try Self.validateHistoryUpdate(history, against: stored)
+                try Self.apply(history, to: record)
+                try context.save()
+            } catch {
+                context.rollback()
+                throw error
+            }
+        }
+    }
+
+    public func softDeleteHistory(_ id: UUID, at date: Date) async throws {
+        try await updateHistoryDeletion(id, deletedAt: date, onlyWhenDeleted: false)
+    }
+
+    public func recoverHistory(_ id: UUID) async throws {
+        try await updateHistoryDeletion(id, deletedAt: nil, onlyWhenDeleted: true)
+    }
+
+    public func purgeHistory(endedBefore cutoff: Date) async throws -> Int {
+        try await store.perform { context in
+            do {
+                let request = NSFetchRequest<HistoryRecord>(entityName: "HistoryRecord")
+                request.predicate = NSPredicate(format: "endedAt < %@", cutoff as NSDate)
+                request.sortDescriptors = [
+                    NSSortDescriptor(key: "endedAt", ascending: true),
+                    NSSortDescriptor(key: "id", ascending: true)
+                ]
+                request.fetchLimit = Self.maximumLimit
+                let records = try context.fetch(request)
+                for record in records {
+                    context.delete(record)
+                }
+                try context.save()
+                return records.count
+            } catch {
+                context.rollback()
+                throw error
+            }
+        }
+    }
+
     public func historyCount(for timerID: UUID, limit: Int = 200) async throws -> Int {
         let limit = Self.boundedLimit(limit)
         return try await store.perform { context in
@@ -378,6 +494,17 @@ public actor TimerCoreDataRepository: TimerRepository {
 
     private static func timerRecord(id: UUID, in context: NSManagedObjectContext) throws -> TimerRecord {
         let request = NSFetchRequest<TimerRecord>(entityName: "TimerRecord")
+        request.predicate = NSPredicate(format: "id == %@", id as NSUUID)
+        request.fetchLimit = 1
+        request.sortDescriptors = [NSSortDescriptor(key: "id", ascending: true)]
+        guard let record = try context.fetch(request).first else {
+            throw TimerRepositoryError.timerNotFound
+        }
+        return record
+    }
+
+    private static func historyRecord(id: UUID, in context: NSManagedObjectContext) throws -> HistoryRecord {
+        let request = NSFetchRequest<HistoryRecord>(entityName: "HistoryRecord")
         request.predicate = NSPredicate(format: "id == %@", id as NSUUID)
         request.fetchLimit = 1
         request.sortDescriptors = [NSSortDescriptor(key: "id", ascending: true)]
@@ -475,6 +602,83 @@ public actor TimerCoreDataRepository: TimerRepository {
         record.endedAt = history.endedAt
         record.deletedAt = history.deletedAt
         record.payload = try TimerPayloadCodec.encodeHistory(history)
+    }
+
+    private func updateHistoryDeletion(_ id: UUID, deletedAt: Date?, onlyWhenDeleted: Bool) async throws {
+        try await store.perform { context in
+            do {
+                let record = try Self.historyRecord(id: id, in: context)
+                let stored = try TimerPayloadCodec.decodeHistory(record.payload)
+                guard (stored.deletedAt != nil) == onlyWhenDeleted else { return }
+                let updated = try Self.history(from: stored, deletedAt: deletedAt)
+                try Self.apply(updated, to: record)
+                try context.save()
+            } catch {
+                context.rollback()
+                throw error
+            }
+        }
+    }
+
+    private static func historyRangePredicate(from: Date?, through: Date?, excludingDeleted: Bool) -> NSPredicate {
+        var predicates = [NSPredicate]()
+        if excludingDeleted {
+            predicates.append(NSPredicate(format: "deletedAt == nil"))
+        }
+        if let from {
+            predicates.append(NSPredicate(format: "endedAt >= %@", from as NSDate))
+        }
+        if let through {
+            predicates.append(NSPredicate(format: "endedAt <= %@", through as NSDate))
+        }
+        return NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+    }
+
+    private static func matchesSearch(_ history: HistoryEntry, query: String) -> Bool {
+        let normalizedQuery = normalizeSearchValue(query)
+        guard !normalizedQuery.isEmpty else { return true }
+        return ([history.title, history.details] + history.tags).contains {
+            normalizeSearchValue($0).contains(normalizedQuery)
+        }
+    }
+
+    private static func normalizeSearchValue(_ value: String) -> String {
+        value
+            .precomposedStringWithCanonicalMapping
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func validateHistoryUpdate(_ incoming: HistoryEntry, against stored: HistoryEntry) throws {
+        guard stored.deletedAt == nil,
+              incoming.deletedAt == nil,
+              incoming.id == stored.id,
+              incoming.timerID == stored.timerID,
+              incoming.occurrenceID == stored.occurrenceID,
+              incoming.kind == stored.kind,
+              incoming.startedAt == stored.startedAt,
+              incoming.endedAt == stored.endedAt,
+              incoming.elapsedSeconds == stored.elapsedSeconds,
+              incoming.completionReason == stored.completionReason else {
+            throw TimerRepositoryError.staleHistoryUpdate
+        }
+    }
+
+    private static func history(from existing: HistoryEntry, deletedAt: Date?) throws -> HistoryEntry {
+        try HistoryEntry(
+            id: existing.id,
+            timerID: existing.timerID,
+            occurrenceID: existing.occurrenceID,
+            title: existing.title,
+            details: existing.details,
+            tags: existing.tags,
+            kind: existing.kind,
+            startedAt: existing.startedAt,
+            endedAt: existing.endedAt,
+            elapsedSeconds: existing.elapsedSeconds,
+            completionReason: existing.completionReason,
+            deletedAt: deletedAt
+        )
     }
 
     private static func history(for timer: TimerItem, at date: Date, reason: CompletionReason = .finished) throws -> HistoryEntry {
