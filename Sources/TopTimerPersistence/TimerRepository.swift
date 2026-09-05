@@ -3,7 +3,6 @@ import Foundation
 import TopTimerDomain
 
 public enum TimerRepositoryError: Error, Equatable, Sendable {
-    case invalidLimit
     case timerNotFound
     case unsupportedPayloadVersion(Int)
     case malformedPayload
@@ -173,7 +172,7 @@ public actor TimerCoreDataRepository: TimerRepository {
     }
 
     public func active(limit: Int) async throws -> [TimerItem] {
-        try Self.validate(limit: limit)
+        let limit = Self.boundedLimit(limit)
         return try await store.perform { context in
             let request = NSFetchRequest<TimerRecord>(entityName: "TimerRecord")
             request.predicate = NSPredicate(
@@ -191,7 +190,7 @@ public actor TimerCoreDataRepository: TimerRepository {
     }
 
     public func activePage(limit: Int, after cursor: TimerPageCursor? = nil) async throws -> TimerPage {
-        try Self.validate(limit: limit)
+        let limit = Self.boundedLimit(limit)
         return try await store.perform { context in
             let request = NSFetchRequest<TimerRecord>(entityName: "TimerRecord")
             let active = NSPredicate(
@@ -261,7 +260,7 @@ public actor TimerCoreDataRepository: TimerRepository {
     }
 
     public func historyCount(for timerID: UUID, limit: Int = 200) async throws -> Int {
-        try Self.validate(limit: limit)
+        let limit = Self.boundedLimit(limit)
         return try await store.perform { context in
             let request = NSFetchRequest<HistoryRecord>(entityName: "HistoryRecord")
             request.predicate = NSPredicate(format: "timerID == %@", timerID as NSUUID)
@@ -280,7 +279,7 @@ public actor TimerCoreDataRepository: TimerRepository {
     }
 
     public func successors(of occurrenceID: UUID, limit: Int = 200) async throws -> [TimerItem] {
-        try Self.validate(limit: limit)
+        let limit = Self.boundedLimit(limit)
         return try await store.perform { context in
             let request = NSFetchRequest<TimerRecord>(entityName: "TimerRecord")
             request.predicate = NSPredicate(format: "predecessorOccurrenceID == %@", occurrenceID as NSUUID)
@@ -303,10 +302,8 @@ public actor TimerCoreDataRepository: TimerRepository {
         }
     }
 
-    private static func validate(limit: Int) throws {
-        guard (1...maximumLimit).contains(limit) else {
-            throw TimerRepositoryError.invalidLimit
-        }
+    private static func boundedLimit(_ limit: Int) -> Int {
+        min(maximumLimit, max(1, limit))
     }
 
     private static func timerRecord(id: UUID, in context: NSManagedObjectContext) throws -> TimerRecord {

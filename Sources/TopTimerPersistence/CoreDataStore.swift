@@ -36,7 +36,9 @@ public final class CoreDataStore: @unchecked Sendable {
     }
 
     static func legacyV1SQLite(at url: URL) async throws -> CoreDataStore {
-        try await CoreDataStore(description: sqliteDescription(at: url), model: TopTimerCoreDataModel.v1Model)
+        let description = sqliteDescription(at: url)
+        description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+        return try await CoreDataStore(description: description, model: TopTimerCoreDataModel.v1Model)
     }
 
     static func sqliteDescription(at url: URL) -> NSPersistentStoreDescription {
@@ -62,6 +64,15 @@ public final class CoreDataStore: @unchecked Sendable {
         }
     }
 
+    func close() async throws {
+        try await perform { context in
+            guard let coordinator = context.persistentStoreCoordinator else { return }
+            for store in coordinator.persistentStores {
+                try coordinator.remove(store)
+            }
+        }
+    }
+
     private static func load(container: NSPersistentContainer) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             container.loadPersistentStores { _, error in
@@ -70,7 +81,7 @@ public final class CoreDataStore: @unchecked Sendable {
                     continuation.resume(throwing: CoreDataStoreError.persistentStoreLoadFailed(
                         domain: failure.domain,
                         code: failure.code,
-                        description: failure.localizedDescription
+                        description: errorDescription(for: failure)
                     ))
                 } else {
                     continuation.resume()
@@ -103,11 +114,11 @@ public final class CoreDataStore: @unchecked Sendable {
             try manager.migrateStore(
                 from: url,
                 sourceType: NSSQLiteStoreType,
-                options: nil,
+                options: [NSPersistentHistoryTrackingKey: true],
                 with: mapping,
                 toDestinationURL: temporaryURL,
                 destinationType: NSSQLiteStoreType,
-                destinationOptions: nil
+                destinationOptions: [NSPersistentHistoryTrackingKey: true]
             )
             let coordinator = NSPersistentStoreCoordinator(managedObjectModel: TopTimerCoreDataModel.model)
             try coordinator.replacePersistentStore(
@@ -124,8 +135,15 @@ public final class CoreDataStore: @unchecked Sendable {
             throw CoreDataStoreError.migrationFailed(
                 domain: failure.domain,
                 code: failure.code,
-                description: failure.localizedDescription
+                description: errorDescription(for: failure)
             )
         }
+    }
+
+    private static func errorDescription(for error: NSError) -> String {
+        guard let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError else {
+            return error.localizedDescription
+        }
+        return "\(error.localizedDescription) Underlying: \(underlying.domain) \(underlying.code) \(underlying.localizedDescription)"
     }
 }

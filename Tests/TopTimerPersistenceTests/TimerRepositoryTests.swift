@@ -207,22 +207,13 @@ final class TimerRepositoryTests: XCTestCase {
         let timerPayload = try legacyEnvelope(payload: JSONEncoder().encode(timer))
         let historyPayload = try legacyEnvelope(payload: JSONEncoder().encode(history))
 
-        let legacyStore = try await CoreDataStore.legacyV1SQLite(at: url)
-        try await legacyStore.perform { context in
-            let timerRecord = NSEntityDescription.insertNewObject(forEntityName: "TimerRecord", into: context)
-            timerRecord.setValue(timer.id, forKey: "id")
-            timerRecord.setValue(timer.occurrenceID, forKey: "occurrenceID")
-            timerRecord.setValue(timer.state.rawValue, forKey: "state")
-            timerRecord.setValue(timer.createdAt, forKey: "createdAt")
-            timerRecord.setValue(timerPayload, forKey: "payload")
-            let historyRecord = NSEntityDescription.insertNewObject(forEntityName: "HistoryRecord", into: context)
-            historyRecord.setValue(history.id, forKey: "id")
-            historyRecord.setValue(history.timerID, forKey: "timerID")
-            historyRecord.setValue(history.occurrenceID, forKey: "occurrenceID")
-            historyRecord.setValue(history.endedAt, forKey: "endedAt")
-            historyRecord.setValue(historyPayload, forKey: "payload")
-            try context.save()
-        }
+        try await writeLegacyV1Store(
+            at: url,
+            timer: timer,
+            timerPayload: timerPayload,
+            history: history,
+            historyPayload: historyPayload
+        )
 
         let repository = TimerCoreDataRepository(store: try await CoreDataStore.sqlite(at: url), calendar: utcCalendar)
         let recovered = try await repository.timer(id: timer.id)
@@ -269,13 +260,51 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertNil(second.nextCursor)
     }
 
-    func testActiveRejectsLimitsOutsideClosedBound() async throws {
+    func testPublicBoundedAPIsClampLimitsToOneThroughTwoHundred() async throws {
         let repository = try await repository()
-        await XCTAssertThrowsErrorAsync({ _ = try await repository.active(limit: 0) }, matching: .invalidLimit)
-        await XCTAssertThrowsErrorAsync({ _ = try await repository.active(limit: 201) }, matching: .invalidLimit)
-        await XCTAssertThrowsErrorAsync({ _ = try await repository.activePage(limit: 0) }, matching: .invalidLimit)
-        await XCTAssertThrowsErrorAsync({ _ = try await repository.historyCount(for: UUID(), limit: 201) }, matching: .invalidLimit)
-        await XCTAssertThrowsErrorAsync({ _ = try await repository.successors(of: UUID(), limit: 0) }, matching: .invalidLimit)
+        for offset in 0..<201 {
+            let timer = try TimerItem.countdown(
+                title: "Timer \(offset)",
+                duration: 60,
+                createdAt: created.addingTimeInterval(TimeInterval(offset))
+            )
+            _ = try await repository.insert(timer)
+        }
+
+        let minimumActive = try await repository.active(limit: -1)
+        let maximumActive = try await repository.active(limit: 201)
+        let minimumPage = try await repository.activePage(limit: 0)
+        let maximumPage = try await repository.activePage(limit: 201)
+        XCTAssertEqual(minimumActive.count, 1)
+        XCTAssertEqual(maximumActive.count, 200)
+        XCTAssertEqual(minimumPage.timers.count, 1)
+        XCTAssertEqual(maximumPage.timers.count, 200)
+
+        let historyTimerID = UUID()
+        for offset in 0..<201 {
+            let history = try HistoryEntry(
+                timerID: historyTimerID,
+                occurrenceID: UUID(),
+                title: "History \(offset)",
+                kind: .countdown,
+                endedAt: created.addingTimeInterval(TimeInterval(offset)),
+                elapsedSeconds: 60,
+                completionReason: .finished
+            )
+            try await repository.insertHistory(history)
+        }
+        let minimumHistory = try await repository.historyCount(for: historyTimerID, limit: -1)
+        let maximumHistory = try await repository.historyCount(for: historyTimerID, limit: 201)
+        XCTAssertEqual(minimumHistory, 1)
+        XCTAssertEqual(maximumHistory, 200)
+
+        let predecessor = UUID()
+        let successor = try timerWithPredecessor(predecessor, occurrenceID: UUID())
+        _ = try await repository.insert(successor)
+        let minimumSuccessors = try await repository.successors(of: predecessor, limit: 0)
+        let maximumSuccessors = try await repository.successors(of: predecessor, limit: 201)
+        XCTAssertEqual(minimumSuccessors.count, 1)
+        XCTAssertEqual(maximumSuccessors.count, 1)
     }
 
     func testUnknownVersionIsRejectedAndSelectedWeekdaysAreCanonical() throws {
@@ -461,6 +490,32 @@ final class TimerRepositoryTests: XCTestCase {
             withJSONObject: ["version": 1, "payload": payload.base64EncodedString()],
             options: [.sortedKeys]
         )
+    }
+
+    private func writeLegacyV1Store(
+        at url: URL,
+        timer: TimerItem,
+        timerPayload: Data,
+        history: HistoryEntry,
+        historyPayload: Data
+    ) async throws {
+        let legacyStore = try await CoreDataStore.legacyV1SQLite(at: url)
+        try await legacyStore.perform { context in
+            let timerRecord = NSEntityDescription.insertNewObject(forEntityName: "TimerRecord", into: context)
+            timerRecord.setValue(timer.id, forKey: "id")
+            timerRecord.setValue(timer.occurrenceID, forKey: "occurrenceID")
+            timerRecord.setValue(timer.state.rawValue, forKey: "state")
+            timerRecord.setValue(timer.createdAt, forKey: "createdAt")
+            timerRecord.setValue(timerPayload, forKey: "payload")
+            let historyRecord = NSEntityDescription.insertNewObject(forEntityName: "HistoryRecord", into: context)
+            historyRecord.setValue(history.id, forKey: "id")
+            historyRecord.setValue(history.timerID, forKey: "timerID")
+            historyRecord.setValue(history.occurrenceID, forKey: "occurrenceID")
+            historyRecord.setValue(history.endedAt, forKey: "endedAt")
+            historyRecord.setValue(historyPayload, forKey: "payload")
+            try context.save()
+        }
+        try await legacyStore.close()
     }
 
     private func XCTAssertThrowsErrorAsync(
