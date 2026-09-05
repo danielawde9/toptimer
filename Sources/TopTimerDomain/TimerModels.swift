@@ -325,6 +325,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
 
     public mutating func updateMetadata(title: String, details: String, tags: [String]) throws {
         try validateTimerMetadata(title: title, details: details, tags: tags)
+        try preflightRevisionIncrement()
         try incrementRevision()
         self.title = title
         self.details = details
@@ -698,10 +699,14 @@ public struct TimerItem: Codable, Equatable, Sendable {
         )
     }
 
-    internal mutating func incrementRevision() throws {
+    internal func preflightRevisionIncrement() throws {
         guard revision < Int.max else {
             throw TimerValidationError.invalidRevision
         }
+    }
+
+    internal mutating func incrementRevision() throws {
+        try preflightRevisionIncrement()
         revision += 1
     }
 }

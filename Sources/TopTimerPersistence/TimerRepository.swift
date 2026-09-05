@@ -3,6 +3,7 @@ import Foundation
 import TopTimerDomain
 
 public enum TimerRepositoryError: Error, Equatable, Sendable {
+    case invalidCreation
     case timerNotFound
     case unsupportedPayloadVersion(Int)
     case malformedPayload
@@ -144,6 +145,7 @@ public actor TimerCoreDataRepository: TimerRepository {
     }
 
     public func insert(_ timer: TimerItem) async throws -> TimerItem {
+        try Self.validateCreation(timer)
         return try await store.perform { context in
             do {
                 let record = TimerRecord(context: context)
@@ -282,6 +284,9 @@ public actor TimerCoreDataRepository: TimerRepository {
             do {
                 let record = try Self.timerRecord(id: id, in: context)
                 var timer = try TimerPayloadCodec.decodeTimer(record.payload)
+                if timer.deletedAt != nil {
+                    return
+                }
                 try timer.softDelete(at: date)
                 try Self.apply(timer, to: record)
                 try context.save()
@@ -337,6 +342,38 @@ public actor TimerCoreDataRepository: TimerRepository {
 
     private static func boundedLimit(_ limit: Int) -> Int {
         min(maximumLimit, max(1, limit))
+    }
+
+    private static func validateCreation(_ timer: TimerItem) throws {
+        guard timer.predecessorOccurrenceID == nil,
+              timer.successorID == nil,
+              timer.completedAt == nil,
+              timer.deletedAt == nil else {
+            throw TimerRepositoryError.invalidCreation
+        }
+        switch timer.state {
+        case .idle:
+            guard timer.revision == 0 else { throw TimerRepositoryError.invalidCreation }
+        case .running:
+            guard timer.revision == 1,
+                  let startedAt = timer.startedAt,
+                  timer.lastTransitionAt == startedAt,
+                  timer.pausedAt == nil else {
+                throw TimerRepositoryError.invalidCreation
+            }
+            switch timer.kind {
+            case .countdown:
+                guard timer.deadline != nil, timer.remaining == nil else {
+                    throw TimerRepositoryError.invalidCreation
+                }
+            case .stopwatch:
+                guard timer.deadline == nil, timer.remaining == nil, timer.accumulatedPause == 0 else {
+                    throw TimerRepositoryError.invalidCreation
+                }
+            }
+        case .paused, .completed, .acknowledged, .cancelled:
+            throw TimerRepositoryError.invalidCreation
+        }
     }
 
     private static func timerRecord(id: UUID, in context: NSManagedObjectContext) throws -> TimerRecord {

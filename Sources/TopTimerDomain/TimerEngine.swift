@@ -37,6 +37,7 @@ public extension TimerItem {
             throw TimerTransitionError.invalidTimestamp
         }
         try requireNotBefore(date, createdAt)
+        try preflightRevisionIncrement()
 
         switch kind {
         case .countdown:
@@ -61,6 +62,7 @@ public extension TimerItem {
         }
         guard let startedAt else { throw TimerTransitionError.invalidState }
         try requireNotBefore(date, lastTransitionAt ?? startedAt)
+        try preflightRevisionIncrement()
 
         switch kind {
         case .countdown:
@@ -88,6 +90,7 @@ public extension TimerItem {
             throw TimerTransitionError.invalidState
         }
         try requireNotBefore(date, lastTransitionAt ?? pausedAt)
+        try preflightRevisionIncrement()
 
         switch kind {
         case .countdown:
@@ -117,6 +120,7 @@ public extension TimerItem {
         if let lastTransitionAt {
             try requireNotBefore(date, lastTransitionAt)
         }
+        try preflightRevisionIncrement()
 
         switch kind {
         case .countdown:
@@ -149,6 +153,7 @@ public extension TimerItem {
             throw TimerTransitionError.invalidState
         }
         try requireNotBefore(date, temporalFloor)
+        try preflightRevisionIncrement()
 
         switch kind {
         case .countdown:
@@ -200,6 +205,7 @@ public extension TimerItem {
             throw TimerTransitionError.invalidState
         }
         try requireNotBefore(date, temporalFloor)
+        try preflightRevisionIncrement()
 
         switch kind {
         case .countdown:
@@ -241,6 +247,7 @@ public extension TimerItem {
         if let temporalFloor = lastTransitionAt ?? completedAt {
             try requireNotBefore(date, temporalFloor)
         }
+        try preflightRevisionIncrement()
         state = .acknowledged
         deletedAt = date
         lastTransitionAt = date
@@ -253,6 +260,7 @@ public extension TimerItem {
         }
         let temporalFloor = completedAt ?? lastTransitionAt ?? createdAt
         try requireNotBefore(date, temporalFloor)
+        try preflightRevisionIncrement()
         deletedAt = date
         try incrementRevision()
     }

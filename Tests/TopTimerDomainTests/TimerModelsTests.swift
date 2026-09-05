@@ -138,6 +138,20 @@ final class TimerModelsTests: XCTestCase {
         }
     }
 
+    func testRevisionOverflowDoesNotPartiallyMutateTransitionState() throws {
+        let created = Date(timeIntervalSince1970: 1_000)
+        let item = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: created)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(item)) as? [String: Any])
+        object["revision"] = Int.max
+        var timer = try JSONDecoder().decode(TimerItem.self, from: JSONSerialization.data(withJSONObject: object))
+        let original = timer
+
+        XCTAssertThrowsError(try timer.start(at: created)) { error in
+            XCTAssertEqual(error as? TimerValidationError, .invalidRevision)
+        }
+        XCTAssertEqual(timer, original)
+    }
+
     func testHistoryEntryValidatesAndRoundTripsThroughCodable() throws {
         let date = Date(timeIntervalSince1970: 1_000)
         let entry = try HistoryEntry(
