@@ -52,6 +52,7 @@ public extension TimerItem {
         lastTransitionAt = date
         completedAt = nil
         deletedAt = nil
+        try incrementRevision()
     }
 
     mutating func pause(at date: Date) throws {
@@ -76,6 +77,7 @@ public extension TimerItem {
         state = .paused
         pausedAt = date
         lastTransitionAt = date
+        try incrementRevision()
     }
 
     mutating func resume(at date: Date) throws {
@@ -104,6 +106,7 @@ public extension TimerItem {
         self.startedAt = startedAt
         self.pausedAt = nil
         lastTransitionAt = date
+        try incrementRevision()
     }
 
     mutating func restart(at date: Date) throws {
@@ -132,6 +135,7 @@ public extension TimerItem {
         lastTransitionAt = date
         completedAt = nil
         deletedAt = nil
+        try incrementRevision()
     }
 
     mutating func complete(at date: Date) throws {
@@ -182,6 +186,7 @@ public extension TimerItem {
         lastTransitionAt = date
         completedAt = date
         deletedAt = nil
+        try incrementRevision()
     }
 
     mutating func cancel(at date: Date) throws {
@@ -223,6 +228,7 @@ public extension TimerItem {
         lastTransitionAt = date
         completedAt = date
         deletedAt = nil
+        try incrementRevision()
     }
 
     mutating func acknowledge(at date: Date = .now) throws {
@@ -238,6 +244,7 @@ public extension TimerItem {
         state = .acknowledged
         deletedAt = date
         lastTransitionAt = date
+        try incrementRevision()
     }
 
     mutating func softDelete(at date: Date) throws {
@@ -247,6 +254,7 @@ public extension TimerItem {
         let temporalFloor = completedAt ?? lastTransitionAt ?? createdAt
         try requireNotBefore(date, temporalFloor)
         deletedAt = date
+        try incrementRevision()
     }
 
     func duplicate(at date: Date = .now) throws -> TimerItem {

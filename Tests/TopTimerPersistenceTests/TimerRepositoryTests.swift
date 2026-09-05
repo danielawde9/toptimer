@@ -57,6 +57,47 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertEqual(successorCount, 1)
     }
 
+    func testCancelIsAtomicAndRetryCreatesOneCancelledHistoryEntry() async throws {
+        let repository = try await repository()
+        var timer = try countdown()
+        try timer.start(at: created)
+        _ = try await repository.insert(timer)
+
+        let first = try await repository.cancel(id: timer.id, at: completed)
+        let second = try await repository.cancel(id: timer.id, at: completed)
+
+        XCTAssertEqual(first.state, .cancelled)
+        XCTAssertEqual(first.revision, timer.revision + 1)
+        XCTAssertEqual(second, first)
+        let historyCount = try await repository.historyCount(for: timer.id)
+        XCTAssertEqual(historyCount, 1)
+    }
+
+    func testCancelConstraintFailureRollsBackTimerStateAndHistory() async throws {
+        let fixture = try await sqliteFixture()
+        defer { fixture.removeFiles() }
+        var timer = try countdown()
+        try timer.start(at: created)
+        _ = try await fixture.repository.insert(timer)
+        let conflictingHistory = try HistoryEntry(
+            timerID: timer.id,
+            occurrenceID: timer.occurrenceID,
+            title: timer.title,
+            kind: timer.kind,
+            endedAt: completed,
+            elapsedSeconds: 60,
+            completionReason: .cancelled
+        )
+        try await fixture.repository.insertHistory(conflictingHistory)
+
+        await XCTAssertThrowsErrorAsync { _ = try await fixture.repository.cancel(id: timer.id, at: self.completed) }
+
+        let persisted = try await fixture.repository.timer(id: timer.id)
+        XCTAssertEqual(persisted, timer)
+        let historyCount = try await fixture.repository.historyCount(for: timer.id)
+        XCTAssertEqual(historyCount, 1)
+    }
+
     func testStaleRunningUpdateCannotRollbackCompletedRecurringSource() async throws {
         let repository = try await repository()
         var source = try countdown(recurrence: .interval(seconds: 300))
@@ -75,6 +116,55 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertEqual(successorCount, 1)
     }
 
+    func testUpdateRejectsAConcurrentSameBaseMetadataSnapshot() async throws {
+        let repository = try await repository()
+        let timer = try countdown()
+        _ = try await repository.insert(timer)
+        var first = try await repository.timer(id: timer.id)
+        var second = try await repository.timer(id: timer.id)
+
+        try first.updateMetadata(title: "First", details: "", tags: [])
+        try second.updateMetadata(title: "Second", details: "", tags: [])
+        try await repository.update(first)
+        await XCTAssertThrowsErrorAsync({ try await repository.update(second) }, matching: .staleTimerUpdate)
+
+        let persisted = try await repository.timer(id: timer.id)
+        XCTAssertEqual(persisted, first)
+    }
+
+    func testUpdateRejectsSnapshotThatPredatesSoftDelete() async throws {
+        let repository = try await repository()
+        let timer = try countdown()
+        _ = try await repository.insert(timer)
+        var stale = try await repository.timer(id: timer.id)
+        try stale.updateMetadata(title: "Stale", details: "", tags: [])
+
+        try await repository.softDelete(timer.id, at: completed)
+        await XCTAssertThrowsErrorAsync({ try await repository.update(stale) }, matching: .staleTimerUpdate)
+
+        let persisted = try await repository.timer(id: timer.id)
+        XCTAssertEqual(persisted.deletedAt, completed)
+    }
+
+    func testUpdateRejectsCraftedAcknowledgementOfAnActiveTimer() async throws {
+        let repository = try await repository()
+        var timer = try countdown()
+        try timer.start(at: created)
+        _ = try await repository.insert(timer)
+        var crafted = timer
+        try crafted.complete(at: created.addingTimeInterval(60))
+        try crafted.acknowledge(at: created.addingTimeInterval(60))
+        var craftedObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(crafted)) as? [String: Any]
+        )
+        craftedObject["revision"] = timer.revision + 1
+        crafted = try JSONDecoder().decode(TimerItem.self, from: JSONSerialization.data(withJSONObject: craftedObject))
+
+        await XCTAssertThrowsErrorAsync({ try await repository.update(crafted) }, matching: .staleTimerUpdate)
+        let persisted = try await repository.timer(id: timer.id)
+        XCTAssertEqual(persisted, timer)
+    }
+
     func testUpdatePermitsForwardDomainTransitionsAndMetadataChanges() async throws {
         let repository = try await repository()
         var timer = try countdown()
@@ -87,9 +177,8 @@ final class TimerRepositoryTests: XCTestCase {
         try await repository.update(timer)
         try timer.resume(at: created.addingTimeInterval(20))
         try await repository.update(timer)
-        try timer.cancel(at: created.addingTimeInterval(30))
+        try timer.restart(at: created.addingTimeInterval(30))
         try await repository.update(timer)
-
         let persisted = try await repository.timer(id: timer.id)
         XCTAssertEqual(persisted, timer)
     }
@@ -260,6 +349,22 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertNil(second.nextCursor)
     }
 
+    func testActivePageHasNoCursorWhenExactlyFull() async throws {
+        let repository = try await repository()
+        for offset in 0..<200 {
+            let timer = try TimerItem.countdown(
+                title: "\(offset)",
+                duration: 60,
+                createdAt: created.addingTimeInterval(TimeInterval(offset))
+            )
+            _ = try await repository.insert(timer)
+        }
+
+        let page = try await repository.activePage(limit: 200)
+        XCTAssertEqual(page.timers.count, 200)
+        XCTAssertNil(page.nextCursor)
+    }
+
     func testPublicBoundedAPIsClampLimitsToOneThroughTwoHundred() async throws {
         let repository = try await repository()
         for offset in 0..<201 {
@@ -357,7 +462,7 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertEqual(String(data: historyFirst, encoding: .utf8)?.prefix(12), "{\"payload\":\"")
         XCTAssertEqual(
             String(data: try envelopePayload(timerFirst), encoding: .utf8),
-            "{\"accumulatedPause\":0,\"alertVolume\":1,\"createdAt\":978308200000,\"details\":\"\",\"duration\":60,\"id\":\"00000000-0000-4000-8000-000000000001\",\"kind\":\"countdown\",\"occurrenceID\":\"00000000-0000-4000-8000-000000000002\",\"recurrence\":{\"selectedWeekdays\":{\"hour\":9,\"minute\":30,\"weekdays\":[2,4,6]}},\"remaining\":60,\"state\":\"idle\",\"tags\":[],\"title\":\"Focus\"}"
+            "{\"accumulatedPause\":0,\"alertVolume\":1,\"createdAt\":978308200000,\"details\":\"\",\"duration\":60,\"id\":\"00000000-0000-4000-8000-000000000001\",\"kind\":\"countdown\",\"occurrenceID\":\"00000000-0000-4000-8000-000000000002\",\"recurrence\":{\"selectedWeekdays\":{\"hour\":9,\"minute\":30,\"weekdays\":[2,4,6]}},\"remaining\":60,\"revision\":0,\"state\":\"idle\",\"tags\":[],\"title\":\"Focus\"}"
         )
         XCTAssertEqual(
             String(data: try envelopePayload(historyFirst), encoding: .utf8),
@@ -377,11 +482,24 @@ final class TimerRepositoryTests: XCTestCase {
             completionReason: .finished
         )
 
-        let legacyTimer = try legacyEnvelope(payload: JSONEncoder().encode(timer))
+        let legacyTimer = try legacyEnvelope(payload: try payloadWithoutRevision(timer))
         let legacyHistory = try legacyEnvelope(payload: JSONEncoder().encode(history))
 
         XCTAssertEqual(try TimerPayloadCodec.decodeTimer(legacyTimer), timer)
         XCTAssertEqual(try TimerPayloadCodec.decodeHistory(legacyHistory), history)
+    }
+
+    func testVersionTwoTimerPayloadWithoutRevisionRemainsReadable() throws {
+        let timer = try countdown()
+        let encoded = try TimerPayloadCodec.encodeTimer(timer)
+        var envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let payload = try XCTUnwrap(Data(base64Encoded: try XCTUnwrap(envelope["payload"] as? String)))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+        object.removeValue(forKey: "revision")
+        envelope["payload"] = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]).base64EncodedString()
+        let legacyVersionTwo = try JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys])
+
+        XCTAssertEqual(try TimerPayloadCodec.decodeTimer(legacyVersionTwo), timer)
     }
 
     func testSoftDeleteExcludesActiveWhilePreservingRecoverableRecord() async throws {
@@ -431,6 +549,7 @@ final class TimerRepositoryTests: XCTestCase {
         _ = try await repository.active(limit: 1)
         _ = try await repository.activePage(limit: 1, after: nil)
         _ = try await repository.complete(timer.id, at: completed)
+        _ = try await repository.cancel(id: timer.id, at: completed)
         try await repository.softDelete(timer.id, at: completed)
         _ = try await repository.historyCount(for: timer.id, limit: 1)
         _ = try await repository.successors(of: timer.occurrenceID, limit: 1)
@@ -490,6 +609,12 @@ final class TimerRepositoryTests: XCTestCase {
             withJSONObject: ["version": 1, "payload": payload.base64EncodedString()],
             options: [.sortedKeys]
         )
+    }
+
+    private func payloadWithoutRevision(_ timer: TimerItem) throws -> Data {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(timer)) as? [String: Any])
+        object.removeValue(forKey: "revision")
+        return try JSONSerialization.data(withJSONObject: object)
     }
 
     private func writeLegacyV1Store(
@@ -582,6 +707,10 @@ private actor ProtocolRepositoryFake: TimerRepository {
         var timer = try TimerItem.stopwatch(title: "Complete", createdAt: created)
         try timer.start(at: created)
         return try RecurrenceService().complete(timer, at: date)
+    }
+
+    func cancel(id: UUID, at date: Date) async throws -> TimerItem {
+        try TimerItem.countdown(title: "Cancelled", duration: 1, createdAt: date)
     }
 
     func softDelete(_ id: UUID, at date: Date) async throws {}

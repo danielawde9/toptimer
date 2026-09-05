@@ -180,6 +180,8 @@ final class RecurrenceCalculatorTests: XCTestCase {
         let successor = try XCTUnwrap(result1.successor)
         XCTAssertEqual(result1.completed.state, .completed)
         XCTAssertEqual(result1.completed.successorID, successor.id)
+        XCTAssertEqual(result1.completed.revision, timer.revision + 2)
+        XCTAssertEqual(successor.revision, 1)
         XCTAssertNil(result2.successor)
         XCTAssertEqual(result2.completed, result1.completed)
         XCTAssertNotEqual(successor.id, result1.completed.id)

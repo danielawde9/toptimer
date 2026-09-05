@@ -106,7 +106,7 @@ public final class CoreDataStore: @unchecked Sendable {
             )
             let temporaryURL = url.deletingLastPathComponent()
                 .appendingPathComponent("TopTimer-migration-\(UUID().uuidString).sqlite")
-            defer { try? FileManager.default.removeItem(at: temporaryURL) }
+            defer { removeSQLiteFamily(at: temporaryURL) }
             let manager = NSMigrationManager(
                 sourceModel: TopTimerCoreDataModel.v1Model,
                 destinationModel: TopTimerCoreDataModel.model
@@ -145,5 +145,17 @@ public final class CoreDataStore: @unchecked Sendable {
             return error.localizedDescription
         }
         return "\(error.localizedDescription) Underlying: \(underlying.domain) \(underlying.code) \(underlying.localizedDescription)"
+    }
+
+    private static func removeSQLiteFamily(at url: URL) {
+        let manager = FileManager.default
+        for path in [url.path, "\(url.path)-wal", "\(url.path)-shm"] {
+            guard manager.fileExists(atPath: path) else { continue }
+            do {
+                try manager.removeItem(atPath: path)
+            } catch {
+                assertionFailure("Failed to remove temporary SQLite file: \(path)")
+            }
+        }
     }
 }

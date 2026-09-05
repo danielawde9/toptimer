@@ -258,6 +258,8 @@ public struct RecurrenceService: Sendable {
         successor.remaining = nil
         successor.predecessorOccurrenceID = completed.occurrenceID
         completed.successorID = stableTimerID
+        try successor.incrementRevision()
+        try completed.incrementRevision()
         return try CompletionOutcome(completed: completed, successor: successor)
     }
 }

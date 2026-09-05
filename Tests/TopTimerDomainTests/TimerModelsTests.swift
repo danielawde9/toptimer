@@ -116,6 +116,28 @@ final class TimerModelsTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(TimerItem.self, from: data), item)
     }
 
+    func testRevisionDefaultsForLegacyPayloadAndAdvancesForMetadata() throws {
+        var item = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: Date(timeIntervalSince1970: 1_000))
+        XCTAssertEqual(item.revision, 0)
+        try item.updateMetadata(title: "Edited", details: "", tags: [])
+        XCTAssertEqual(item.revision, 1)
+
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(item)) as? [String: Any])
+        legacy.removeValue(forKey: "revision")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        XCTAssertEqual(try JSONDecoder().decode(TimerItem.self, from: legacyData).revision, 0)
+
+        legacy["revision"] = -1
+        let invalidData = try JSONSerialization.data(withJSONObject: legacy)
+        XCTAssertThrowsError(try JSONDecoder().decode(TimerItem.self, from: invalidData))
+
+        legacy["revision"] = Int.max
+        var maximumRevision = try JSONDecoder().decode(TimerItem.self, from: JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertThrowsError(try maximumRevision.updateMetadata(title: "Overflow", details: "", tags: [])) { error in
+            XCTAssertEqual(error as? TimerValidationError, .invalidRevision)
+        }
+    }
+
     func testHistoryEntryValidatesAndRoundTripsThroughCodable() throws {
         let date = Date(timeIntervalSince1970: 1_000)
         let entry = try HistoryEntry(

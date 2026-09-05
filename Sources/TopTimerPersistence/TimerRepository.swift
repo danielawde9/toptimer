@@ -15,6 +15,7 @@ public protocol TimerRepository: Sendable {
     func active(limit: Int) async throws -> [TimerItem]
     func activePage(limit: Int, after cursor: TimerPageCursor?) async throws -> TimerPage
     func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome
+    func cancel(id: UUID, at date: Date) async throws -> TimerItem
     func softDelete(_ id: UUID, at date: Date) async throws
     func historyCount(for timerID: UUID, limit: Int) async throws -> Int
     func successors(of occurrenceID: UUID, limit: Int) async throws -> [TimerItem]
@@ -213,7 +214,18 @@ public actor TimerCoreDataRepository: TimerRepository {
             request.fetchLimit = limit
             let records = try context.fetch(request)
             let timers = try records.map { try TimerPayloadCodec.decodeTimer($0.payload) }
-            let nextCursor = records.count == limit ? TimerPageCursor(createdAt: records[limit - 1].createdAt, id: records[limit - 1].id) : nil
+            let nextCursor = try records.last.flatMap { last in
+                let probe = NSFetchRequest<NSManagedObjectID>(entityName: "TimerRecord")
+                let after = NSPredicate(
+                    format: "createdAt > %@ OR (createdAt == %@ AND id > %@)",
+                    last.createdAt as NSDate, last.createdAt as NSDate, last.id as NSUUID
+                )
+                probe.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [active, after])
+                probe.sortDescriptors = request.sortDescriptors
+                probe.fetchLimit = 1
+                probe.resultType = .managedObjectIDResultType
+                return try context.fetch(probe).isEmpty ? nil : TimerPageCursor(createdAt: last.createdAt, id: last.id)
+            }
             return TimerPage(timers: timers, nextCursor: nextCursor)
         }
     }
@@ -237,6 +249,27 @@ public actor TimerCoreDataRepository: TimerRepository {
                 }
                 try context.save()
                 return outcome
+            } catch {
+                context.rollback()
+                throw error
+            }
+        }
+    }
+
+    public func cancel(id: UUID, at date: Date) async throws -> TimerItem {
+        try await store.perform { context in
+            do {
+                let record = try Self.timerRecord(id: id, in: context)
+                var timer = try TimerPayloadCodec.decodeTimer(record.payload)
+                if timer.state == .cancelled {
+                    return timer
+                }
+                try timer.cancel(at: date)
+                try Self.apply(timer, to: record)
+                let historyRecord = HistoryRecord(context: context)
+                try Self.apply(try Self.history(for: timer, at: date, reason: .cancelled), to: historyRecord)
+                try context.save()
+                return timer
             } catch {
                 context.rollback()
                 throw error
@@ -333,29 +366,68 @@ public actor TimerCoreDataRepository: TimerRepository {
         guard incoming.id == stored.id,
               incoming.occurrenceID == stored.occurrenceID,
               incoming.predecessorOccurrenceID == stored.predecessorOccurrenceID,
-              incoming.successorID == stored.successorID else {
+              incoming.successorID == stored.successorID,
+              stored.deletedAt == nil,
+              incoming.deletedAt == nil,
+              stored.revision < Int.max,
+              incoming.revision == stored.revision + 1,
+              isPermittedUpdate(incoming, from: stored) else {
             throw TimerRepositoryError.staleTimerUpdate
         }
+    }
 
-        let incomingTransition = incoming.lastTransitionAt ?? incoming.createdAt
-        let storedTransition = stored.lastTransitionAt ?? stored.createdAt
-        guard incomingTransition >= storedTransition else {
-            throw TimerRepositoryError.staleTimerUpdate
+    private static func isPermittedUpdate(_ incoming: TimerItem, from stored: TimerItem) -> Bool {
+        guard incoming.state == .idle || incoming.state == .running || incoming.state == .paused else {
+            return false
         }
+        switch (stored.state, incoming.state) {
+        case (.idle, .idle), (.paused, .paused):
+            return matchesMetadataUpdate(incoming, from: stored)
+        case (.running, .running):
+            return matchesMetadataUpdate(incoming, from: stored) || matchesTransition(incoming, from: stored) { timer, date in
+                try timer.restart(at: date)
+            }
+        case (.idle, .running):
+            return matchesTransition(incoming, from: stored) { timer, date in
+                try timer.start(at: date)
+            }
+        case (.running, .paused):
+            return matchesTransition(incoming, from: stored) { timer, date in
+                try timer.pause(at: date)
+            }
+        case (.paused, .running):
+            return matchesTransition(incoming, from: stored) { timer, date in
+                try timer.resume(at: date)
+            } || matchesTransition(incoming, from: stored) { timer, date in
+                try timer.restart(at: date)
+            }
+        default:
+            return false
+        }
+    }
 
-        switch stored.state {
-        case .completed:
-            guard incoming.state == .completed || incoming.state == .acknowledged else {
-                throw TimerRepositoryError.staleTimerUpdate
-            }
-        case .acknowledged, .cancelled:
-            guard incoming.state == stored.state else {
-                throw TimerRepositoryError.staleTimerUpdate
-            }
-        case .idle, .running, .paused:
-            guard incoming.state != .completed else {
-                throw TimerRepositoryError.staleTimerUpdate
-            }
+    private static func matchesMetadataUpdate(_ incoming: TimerItem, from stored: TimerItem) -> Bool {
+        do {
+            var expected = stored
+            try expected.updateMetadata(title: incoming.title, details: incoming.details, tags: incoming.tags)
+            return expected == incoming
+        } catch {
+            return false
+        }
+    }
+
+    private static func matchesTransition(
+        _ incoming: TimerItem,
+        from stored: TimerItem,
+        operation: (inout TimerItem, Date) throws -> Void
+    ) -> Bool {
+        guard let date = incoming.lastTransitionAt else { return false }
+        do {
+            var expected = stored
+            try operation(&expected, date)
+            return expected == incoming
+        } catch {
+            return false
         }
     }
 
@@ -368,11 +440,12 @@ public actor TimerCoreDataRepository: TimerRepository {
         record.payload = try TimerPayloadCodec.encodeHistory(history)
     }
 
-    private static func history(for timer: TimerItem, at date: Date) throws -> HistoryEntry {
+    private static func history(for timer: TimerItem, at date: Date, reason: CompletionReason = .finished) throws -> HistoryEntry {
         let elapsed: TimeInterval
         switch timer.kind {
         case .countdown:
-            elapsed = timer.duration ?? 0
+            let duration = timer.duration ?? 0
+            elapsed = reason == .cancelled ? max(0, duration - (timer.remaining ?? 0)) : duration
         case .stopwatch:
             guard let startedAt = timer.startedAt else { throw TimerTransitionError.invalidState }
             elapsed = max(0, date.timeIntervalSince(startedAt) - timer.accumulatedPause)
@@ -387,7 +460,7 @@ public actor TimerCoreDataRepository: TimerRepository {
             startedAt: timer.startedAt,
             endedAt: date,
             elapsedSeconds: elapsed,
-            completionReason: .finished
+            completionReason: reason
         )
     }
 

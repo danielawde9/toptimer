@@ -7,6 +7,7 @@ public enum TimerValidationError: Error, Equatable, Sendable {
     case tooManyTags
     case tagTooLong
     case recurrenceUnsupportedForStopwatch
+    case invalidRevision
 }
 
 public enum RecurrenceValidationError: Error, Equatable, Sendable {
@@ -148,6 +149,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
     public internal(set) var alertVolume: Double
     public internal(set) var successorID: UUID?
     public internal(set) var predecessorOccurrenceID: UUID?
+    public internal(set) var revision: Int
 
     public static func countdown(
         title: String,
@@ -272,7 +274,8 @@ public struct TimerItem: Codable, Equatable, Sendable {
         alertName: String? = nil,
         alertVolume: Double = 1,
         successorID: UUID? = nil,
-        predecessorOccurrenceID: UUID? = nil
+        predecessorOccurrenceID: UUID? = nil,
+        revision: Int = 0
     ) throws {
         try validateTimerMetadata(title: title, details: details, tags: tags)
         try validateRecurrence(recurrence)
@@ -314,10 +317,15 @@ public struct TimerItem: Codable, Equatable, Sendable {
         self.alertVolume = alertVolume
         self.successorID = successorID
         self.predecessorOccurrenceID = predecessorOccurrenceID
+        guard revision >= 0 else {
+            throw TimerValidationError.invalidRevision
+        }
+        self.revision = revision
     }
 
     public mutating func updateMetadata(title: String, details: String, tags: [String]) throws {
         try validateTimerMetadata(title: title, details: details, tags: tags)
+        try incrementRevision()
         self.title = title
         self.details = details
         self.tags = tags
@@ -346,6 +354,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         case alertVolume
         case successorID
         case predecessorOccurrenceID
+        case revision
     }
 
     public init(from decoder: Decoder) throws {
@@ -370,6 +379,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         let occurrenceID = try container.decode(UUID.self, forKey: .occurrenceID)
         let successorID = try container.decodeIfPresent(UUID.self, forKey: .successorID)
         let predecessorOccurrenceID = try container.decodeIfPresent(UUID.self, forKey: .predecessorOccurrenceID)
+        let revision = try container.decodeIfPresent(Int.self, forKey: .revision) ?? 0
 
         do {
             try Self.validateFullShape(
@@ -392,7 +402,8 @@ public struct TimerItem: Codable, Equatable, Sendable {
                 deletedAt: deletedAt,
                 recurrence: recurrence,
                 successorID: successorID,
-                predecessorOccurrenceID: predecessorOccurrenceID
+                predecessorOccurrenceID: predecessorOccurrenceID,
+                revision: revision
             )
         } catch {
             throw Self.corrupted(decoder, reason: "Invalid timer metadata or recurrence")
@@ -420,6 +431,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         self.alertVolume = try container.decode(Double.self, forKey: .alertVolume)
         self.successorID = successorID
         self.predecessorOccurrenceID = predecessorOccurrenceID
+        self.revision = revision
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -444,7 +456,8 @@ public struct TimerItem: Codable, Equatable, Sendable {
                 deletedAt: deletedAt,
                 recurrence: recurrence,
                 successorID: successorID,
-                predecessorOccurrenceID: predecessorOccurrenceID
+                predecessorOccurrenceID: predecessorOccurrenceID,
+                revision: revision
             )
         } catch {
             throw EncodingError.invalidValue(
@@ -479,6 +492,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         try container.encode(alertVolume, forKey: .alertVolume)
         try container.encodeIfPresent(successorID, forKey: .successorID)
         try container.encodeIfPresent(predecessorOccurrenceID, forKey: .predecessorOccurrenceID)
+        try container.encode(revision, forKey: .revision)
     }
 
     private static func validateFullShape(
@@ -501,11 +515,15 @@ public struct TimerItem: Codable, Equatable, Sendable {
         deletedAt: Date?,
         recurrence: RecurrenceRule,
         successorID: UUID?,
-        predecessorOccurrenceID: UUID?
+        predecessorOccurrenceID: UUID?,
+        revision: Int
     ) throws {
         try validateTimerMetadata(title: title, details: details, tags: tags)
         try validateRecurrence(recurrence)
         guard !(kind == .stopwatch && recurrence != .none) else {
+            throw TimerShapeValidationError.invalidShape
+        }
+        guard revision >= 0 else {
             throw TimerShapeValidationError.invalidShape
         }
         if let predecessorOccurrenceID {
@@ -678,6 +696,13 @@ public struct TimerItem: Codable, Equatable, Sendable {
         DecodingError.dataCorrupted(
             DecodingError.Context(codingPath: decoder.codingPath, debugDescription: reason)
         )
+    }
+
+    internal mutating func incrementRevision() throws {
+        guard revision < Int.max else {
+            throw TimerValidationError.invalidRevision
+        }
+        revision += 1
     }
 }
 
