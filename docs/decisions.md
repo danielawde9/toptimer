@@ -150,3 +150,26 @@ weekday values make the otherwise unordered set stable for backups and tests.
 
 **If the client answers differently:** A requested migration policy would add a
 new decoder/migration path while retaining the existing version-one reader.
+
+## 2026-09-05 — Canonical persistence timestamps
+
+**Decision:** Encode version-one persistence dates as Unix milliseconds and data
+as Base64, with sorted JSON object keys at both envelope and payload layers.
+
+**Why:** Explicit representations make backups byte-stable across independent
+encoder instances and eliminate reliance on Foundation's default date strategy.
+
+**If the client answers differently:** A different interchange format requires a
+new envelope version and a migration reader for existing local records.
+
+## 2026-09-05 — Canonical payload version two
+
+**Decision:** Emit canonical payloads as envelope version two while retaining a
+read-only version-one decoder using its original Foundation date semantics.
+
+**Why:** The completed version-one implementation may already have local data;
+changing its timestamp codec without a version boundary would make that data
+unreadable.
+
+**If the client answers differently:** Dropping version-one compatibility is a
+data-retention decision and would require an explicit migration or reset flow.

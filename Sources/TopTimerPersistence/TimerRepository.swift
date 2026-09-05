@@ -13,8 +13,12 @@ public protocol TimerRepository: Sendable {
     func insert(_ timer: TimerItem) async throws -> TimerItem
     func update(_ timer: TimerItem) async throws
     func active(limit: Int) async throws -> [TimerItem]
+    func activePage(limit: Int, after cursor: TimerPageCursor?) async throws -> TimerPage
     func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome
     func softDelete(_ id: UUID, at date: Date) async throws
+    func historyCount(for timerID: UUID, limit: Int) async throws -> Int
+    func successors(of occurrenceID: UUID, limit: Int) async throws -> [TimerItem]
+    func timer(id: UUID) async throws -> TimerItem
 }
 
 public struct TimerPageCursor: Codable, Equatable, Sendable {
@@ -38,7 +42,8 @@ public struct TimerPage: Equatable, Sendable {
 }
 
 public enum TimerPayloadCodec {
-    private static let version = 1
+    private static let legacyVersion = 1
+    private static let version = 2
 
     private struct Envelope: Codable {
         let version: Int
@@ -47,49 +52,49 @@ public enum TimerPayloadCodec {
 
     public static func encodeTimer(_ timer: TimerItem) throws -> Data {
         let payload = try canonicalTimerPayload(timer)
-        return try JSONEncoder().encode(Envelope(version: version, payload: payload))
+        return try encoder().encode(Envelope(version: version, payload: payload))
     }
 
     public static func decodeTimer(_ data: Data) throws -> TimerItem {
         let envelope: Envelope
         do {
-            envelope = try JSONDecoder().decode(Envelope.self, from: data)
+            envelope = try decoder().decode(Envelope.self, from: data)
         } catch {
             throw TimerRepositoryError.malformedPayload
         }
-        guard envelope.version == version else {
+        guard envelope.version == legacyVersion || envelope.version == version else {
             throw TimerRepositoryError.unsupportedPayloadVersion(envelope.version)
         }
         do {
-            return try JSONDecoder().decode(TimerItem.self, from: envelope.payload)
+            return try payloadDecoder(for: envelope.version).decode(TimerItem.self, from: envelope.payload)
         } catch {
             throw TimerRepositoryError.malformedPayload
         }
     }
 
     static func encodeHistory(_ history: HistoryEntry) throws -> Data {
-        try JSONEncoder().encode(Envelope(version: version, payload: try JSONEncoder().encode(history)))
+        try encoder().encode(Envelope(version: version, payload: try canonicalHistoryPayload(history)))
     }
 
     static func decodeHistory(_ data: Data) throws -> HistoryEntry {
         let envelope: Envelope
         do {
-            envelope = try JSONDecoder().decode(Envelope.self, from: data)
+            envelope = try decoder().decode(Envelope.self, from: data)
         } catch {
             throw TimerRepositoryError.malformedPayload
         }
-        guard envelope.version == version else {
+        guard envelope.version == legacyVersion || envelope.version == version else {
             throw TimerRepositoryError.unsupportedPayloadVersion(envelope.version)
         }
         do {
-            return try JSONDecoder().decode(HistoryEntry.self, from: envelope.payload)
+            return try payloadDecoder(for: envelope.version).decode(HistoryEntry.self, from: envelope.payload)
         } catch {
             throw TimerRepositoryError.malformedPayload
         }
     }
 
     private static func canonicalTimerPayload(_ timer: TimerItem) throws -> Data {
-        let raw = try JSONEncoder().encode(timer)
+        let raw = try encoder().encode(timer)
         guard var object = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
             throw TimerRepositoryError.malformedPayload
         }
@@ -101,6 +106,29 @@ public enum TimerPayloadCodec {
             object["recurrence"] = recurrence
         }
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    private static func canonicalHistoryPayload(_ history: HistoryEntry) throws -> Data {
+        try encoder().encode(history)
+    }
+
+    private static func encoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        encoder.dataEncodingStrategy = .base64
+        return encoder
+    }
+
+    private static func decoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        decoder.dataDecodingStrategy = .base64
+        return decoder
+    }
+
+    private static func payloadDecoder(for version: Int) -> JSONDecoder {
+        version == legacyVersion ? JSONDecoder() : decoder()
     }
 }
 
@@ -294,7 +322,6 @@ public actor TimerCoreDataRepository: TimerRepository {
         record.id = timer.id
         record.occurrenceID = timer.occurrenceID
         record.predecessorOccurrenceID = timer.predecessorOccurrenceID
-        record.predecessorKey = timer.predecessorOccurrenceID?.uuidString.lowercased()
         record.state = timer.state.rawValue
         record.deadline = timer.deadline
         record.createdAt = timer.createdAt
@@ -342,7 +369,7 @@ public actor TimerCoreDataRepository: TimerRepository {
               var timer = try JSONSerialization.jsonObject(with: payload) as? [String: Any] else {
             throw TimerRepositoryError.malformedPayload
         }
-        timer["deletedAt"] = date.timeIntervalSinceReferenceDate
+        timer["deletedAt"] = date.timeIntervalSince1970 * 1_000
         let timerData = try JSONSerialization.data(withJSONObject: timer, options: [.sortedKeys])
         envelope["payload"] = timerData.base64EncodedString()
         return try JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys])

@@ -6,7 +6,6 @@ final class TimerRecord: NSManagedObject {
     @NSManaged var id: UUID
     @NSManaged var occurrenceID: UUID
     @NSManaged var predecessorOccurrenceID: UUID?
-    @NSManaged var predecessorKey: String?
     @NSManaged var state: String
     @NSManaged var deadline: Date?
     @NSManaged var createdAt: Date
@@ -45,19 +44,21 @@ enum TopTimerCoreDataModel {
         entity.name = "TimerRecord"
         entity.managedObjectClassName = NSStringFromClass(TimerRecord.self)
         entity.properties = [
-            attribute("id", .UUIDAttributeType, optional: false, indexed: true),
-            attribute("occurrenceID", .UUIDAttributeType, optional: false, indexed: true),
-            attribute("predecessorOccurrenceID", .UUIDAttributeType, optional: true, indexed: true),
-            attribute("predecessorKey", .stringAttributeType, optional: true, indexed: true),
-            attribute("state", .stringAttributeType, optional: false, indexed: true),
-            attribute("deadline", .dateAttributeType, optional: true, indexed: true),
-            attribute("createdAt", .dateAttributeType, optional: false, indexed: true),
-            attribute("completedAt", .dateAttributeType, optional: true, indexed: true),
-            attribute("deletedAt", .dateAttributeType, optional: true, indexed: true),
-            attribute("payload", .binaryDataAttributeType, optional: false, indexed: false)
+            attribute("id", .UUIDAttributeType, optional: false),
+            attribute("occurrenceID", .UUIDAttributeType, optional: false),
+            attribute("predecessorOccurrenceID", .UUIDAttributeType, optional: true),
+            attribute("state", .stringAttributeType, optional: false),
+            attribute("deadline", .dateAttributeType, optional: true),
+            attribute("createdAt", .dateAttributeType, optional: false),
+            attribute("completedAt", .dateAttributeType, optional: true),
+            attribute("deletedAt", .dateAttributeType, optional: true),
+            attribute("payload", .binaryDataAttributeType, optional: false)
         ]
-        entity.uniquenessConstraints = [["id"], ["occurrenceID"], ["predecessorKey"]]
-        entity.indexes = [index("timer_active", entity, ["state", "deadline", "createdAt", "deletedAt"])]
+        entity.uniquenessConstraints = [["id"], ["occurrenceID"], ["predecessorOccurrenceID"]]
+        entity.indexes = [
+            index("timer_active", entity, ["state", "deadline", "createdAt", "deletedAt"]),
+            index("timer_predecessor", entity, ["predecessorOccurrenceID"])
+        ]
         return entity
     }
 
@@ -66,12 +67,12 @@ enum TopTimerCoreDataModel {
         entity.name = "HistoryRecord"
         entity.managedObjectClassName = NSStringFromClass(HistoryRecord.self)
         entity.properties = [
-            attribute("id", .UUIDAttributeType, optional: false, indexed: true),
-            attribute("timerID", .UUIDAttributeType, optional: false, indexed: true),
-            attribute("occurrenceID", .UUIDAttributeType, optional: false, indexed: true),
-            attribute("endedAt", .dateAttributeType, optional: false, indexed: true),
-            attribute("deletedAt", .dateAttributeType, optional: true, indexed: true),
-            attribute("payload", .binaryDataAttributeType, optional: false, indexed: false)
+            attribute("id", .UUIDAttributeType, optional: false),
+            attribute("timerID", .UUIDAttributeType, optional: false),
+            attribute("occurrenceID", .UUIDAttributeType, optional: false),
+            attribute("endedAt", .dateAttributeType, optional: false),
+            attribute("deletedAt", .dateAttributeType, optional: true),
+            attribute("payload", .binaryDataAttributeType, optional: false)
         ]
         entity.uniquenessConstraints = [["id"], ["occurrenceID"]]
         entity.indexes = [index("history_timeline", entity, ["timerID", "endedAt", "deletedAt"])]
@@ -83,10 +84,10 @@ enum TopTimerCoreDataModel {
         entity.name = "PresetRecord"
         entity.managedObjectClassName = NSStringFromClass(PresetRecord.self)
         entity.properties = [
-            attribute("id", .UUIDAttributeType, optional: false, indexed: true),
-            attribute("createdAt", .dateAttributeType, optional: false, indexed: true),
-            attribute("deletedAt", .dateAttributeType, optional: true, indexed: true),
-            attribute("payload", .binaryDataAttributeType, optional: false, indexed: false)
+            attribute("id", .UUIDAttributeType, optional: false),
+            attribute("createdAt", .dateAttributeType, optional: false),
+            attribute("deletedAt", .dateAttributeType, optional: true),
+            attribute("payload", .binaryDataAttributeType, optional: false)
         ]
         entity.uniquenessConstraints = [["id"]]
         entity.indexes = [index("preset_recovery", entity, ["createdAt", "deletedAt"])]
@@ -96,14 +97,12 @@ enum TopTimerCoreDataModel {
     private static func attribute(
         _ name: String,
         _ type: NSAttributeType,
-        optional: Bool,
-        indexed: Bool
+        optional: Bool
     ) -> NSAttributeDescription {
         let attribute = NSAttributeDescription()
         attribute.name = name
         attribute.attributeType = type
         attribute.isOptional = optional
-        _ = indexed
         return attribute
     }
 

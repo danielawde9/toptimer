@@ -1,4 +1,5 @@
 import XCTest
+@preconcurrency import CoreData
 import Foundation
 import TopTimerDomain
 @testable import TopTimerPersistence
@@ -46,6 +47,29 @@ final class TimerRepositoryTests: XCTestCase {
             XCTFail("Expected predecessor uniqueness constraint to reject a second successor")
         } catch {
             XCTAssertFalse(error is TimerRepositoryError)
+        }
+    }
+
+    func testRawRowsEnforceSemanticPredecessorUniquenessWhileAllowingRoots() async throws {
+        let fixture = try await sqliteFixture()
+        defer { fixture.removeFiles() }
+        let firstRoot = try countdown()
+        let secondRoot = try countdown()
+        try await fixture.store.perform { context in
+            try insertRawTimer(firstRoot, predecessor: nil, in: context)
+            try insertRawTimer(secondRoot, predecessor: nil, in: context)
+            try context.save()
+        }
+
+        let predecessor = UUID()
+        let firstChild = try countdown()
+        let secondChild = try countdown()
+        await XCTAssertThrowsErrorAsync {
+            _ = try await fixture.store.perform { context in
+                try insertRawTimer(firstChild, predecessor: predecessor, in: context)
+                try insertRawTimer(secondChild, predecessor: predecessor, in: context)
+                try context.save()
+            }
         }
     }
 
@@ -162,11 +186,70 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertEqual((selected["weekdays"] as? [NSNumber])?.map(\.intValue), [2, 4, 6])
 
         var unknown = outer
-        unknown["version"] = 2
+        unknown["version"] = 3
         let unknownData = try JSONSerialization.data(withJSONObject: unknown, options: [.sortedKeys])
         XCTAssertThrowsError(try TimerPayloadCodec.decodeTimer(unknownData)) { error in
-            XCTAssertEqual(error as? TimerRepositoryError, .unsupportedPayloadVersion(2))
+            XCTAssertEqual(error as? TimerRepositoryError, .unsupportedPayloadVersion(3))
         }
+    }
+
+    func testTimerAndHistoryJSONAreByteCanonicalAtEveryLayer() throws {
+        let timerID = try XCTUnwrap(UUID(uuidString: "00000000-0000-4000-8000-000000000001"))
+        let occurrenceID = try XCTUnwrap(UUID(uuidString: "00000000-0000-4000-8000-000000000002"))
+        let timer = try countdown(
+            id: timerID,
+            occurrenceID: occurrenceID,
+            recurrence: .selectedWeekdays(weekdays: [6, 2, 4], hour: 9, minute: 30)
+        )
+        let history = try HistoryEntry(
+            id: try XCTUnwrap(UUID(uuidString: "00000000-0000-4000-8000-000000000003")),
+            timerID: timerID,
+            occurrenceID: occurrenceID,
+            title: "Focus",
+            kind: .countdown,
+            endedAt: completed,
+            elapsedSeconds: 60,
+            completionReason: .finished
+        )
+
+        let timerFirst = try TimerPayloadCodec.encodeTimer(timer)
+        let timerSecond = try TimerPayloadCodec.encodeTimer(timer)
+        let historyFirst = try TimerPayloadCodec.encodeHistory(history)
+        let historySecond = try TimerPayloadCodec.encodeHistory(history)
+
+        XCTAssertEqual(timerFirst, timerSecond)
+        XCTAssertEqual(historyFirst, historySecond)
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: timerFirst) as? [String: Any])?["version"] as? Int, 2)
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: historyFirst) as? [String: Any])?["version"] as? Int, 2)
+        XCTAssertEqual(String(data: timerFirst, encoding: .utf8)?.prefix(12), "{\"payload\":\"")
+        XCTAssertEqual(String(data: historyFirst, encoding: .utf8)?.prefix(12), "{\"payload\":\"")
+        XCTAssertEqual(
+            String(data: try envelopePayload(timerFirst), encoding: .utf8),
+            "{\"accumulatedPause\":0,\"alertVolume\":1,\"createdAt\":978308200000,\"details\":\"\",\"duration\":60,\"id\":\"00000000-0000-4000-8000-000000000001\",\"kind\":\"countdown\",\"occurrenceID\":\"00000000-0000-4000-8000-000000000002\",\"recurrence\":{\"selectedWeekdays\":{\"hour\":9,\"minute\":30,\"weekdays\":[2,4,6]}},\"remaining\":60,\"state\":\"idle\",\"tags\":[],\"title\":\"Focus\"}"
+        )
+        XCTAssertEqual(
+            String(data: try envelopePayload(historyFirst), encoding: .utf8),
+            "{\"completionReason\":\"finished\",\"details\":\"\",\"elapsedSeconds\":60,\"endedAt\":978308300000,\"id\":\"00000000-0000-4000-8000-000000000003\",\"kind\":\"countdown\",\"occurrenceID\":\"00000000-0000-4000-8000-000000000002\",\"tags\":[],\"timerID\":\"00000000-0000-4000-8000-000000000001\",\"title\":\"Focus\"}"
+        )
+    }
+
+    func testVersionOneTimerAndHistoryPayloadsRemainReadable() throws {
+        let timer = try countdown()
+        let history = try HistoryEntry(
+            timerID: timer.id,
+            occurrenceID: timer.occurrenceID,
+            title: timer.title,
+            kind: timer.kind,
+            endedAt: completed,
+            elapsedSeconds: 60,
+            completionReason: .finished
+        )
+
+        let legacyTimer = try legacyEnvelope(payload: JSONEncoder().encode(timer))
+        let legacyHistory = try legacyEnvelope(payload: JSONEncoder().encode(history))
+
+        XCTAssertEqual(try TimerPayloadCodec.decodeTimer(legacyTimer), timer)
+        XCTAssertEqual(try TimerPayloadCodec.decodeHistory(legacyHistory), history)
     }
 
     func testSoftDeleteExcludesActiveWhilePreservingRecoverableRecord() async throws {
@@ -180,6 +263,21 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertEqual(active, [])
         let recovered = try await repository.timer(id: timer.id)
         XCTAssertEqual(recovered.deletedAt, completed)
+    }
+
+    func testProtocolExistentialExposesEveryPersistenceOperation() async throws {
+        let repository: any TimerRepository = ProtocolRepositoryFake()
+        let timer = try countdown()
+
+        _ = try await repository.insert(timer)
+        try await repository.update(timer)
+        _ = try await repository.active(limit: 1)
+        _ = try await repository.activePage(limit: 1, after: nil)
+        _ = try await repository.complete(timer.id, at: completed)
+        try await repository.softDelete(timer.id, at: completed)
+        _ = try await repository.historyCount(for: timer.id, limit: 1)
+        _ = try await repository.successors(of: timer.occurrenceID, limit: 1)
+        _ = try await repository.timer(id: timer.id)
     }
 
     private var utcCalendar: Calendar {
@@ -198,6 +296,7 @@ final class TimerRepositoryTests: XCTestCase {
         let store = try await CoreDataStore.sqlite(at: directory.appendingPathComponent("TopTimer.sqlite"))
         return SQLiteFixture(
             repository: TimerCoreDataRepository(store: store, calendar: utcCalendar),
+            store: store,
             directory: directory
         )
     }
@@ -224,6 +323,18 @@ final class TimerRepositoryTests: XCTestCase {
         return try JSONDecoder().decode(TimerItem.self, from: JSONSerialization.data(withJSONObject: object))
     }
 
+    private func envelopePayload(_ data: Data) throws -> Data {
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        return try XCTUnwrap(Data(base64Encoded: try XCTUnwrap(object["payload"] as? String)))
+    }
+
+    private func legacyEnvelope(payload: Data) throws -> Data {
+        try JSONSerialization.data(
+            withJSONObject: ["version": 1, "payload": payload.base64EncodedString()],
+            options: [.sortedKeys]
+        )
+    }
+
     private func XCTAssertThrowsErrorAsync(
         _ expression: @escaping () async throws -> Void,
         matching expected: TimerRepositoryError? = nil,
@@ -243,9 +354,56 @@ final class TimerRepositoryTests: XCTestCase {
 
 private struct SQLiteFixture {
     let repository: TimerCoreDataRepository
+    let store: CoreDataStore
     let directory: URL
 
     func removeFiles() {
         try? FileManager.default.removeItem(at: directory)
+    }
+}
+
+private func insertRawTimer(
+    _ timer: TimerItem,
+    predecessor: UUID?,
+    in context: NSManagedObjectContext
+) throws {
+    let record = TimerRecord(context: context)
+    record.id = timer.id
+    record.occurrenceID = timer.occurrenceID
+    record.predecessorOccurrenceID = predecessor
+    record.state = timer.state.rawValue
+    record.deadline = timer.deadline
+    record.createdAt = timer.createdAt
+    record.completedAt = timer.completedAt
+    record.deletedAt = timer.deletedAt
+    record.payload = try TimerPayloadCodec.encodeTimer(timer)
+}
+
+private actor ProtocolRepositoryFake: TimerRepository {
+    func insert(_ timer: TimerItem) async throws -> TimerItem { timer }
+
+    func update(_ timer: TimerItem) async throws {}
+
+    func active(limit: Int) async throws -> [TimerItem] { [] }
+
+    func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome {
+        let created = Date(timeIntervalSinceReferenceDate: 0)
+        var timer = try TimerItem.stopwatch(title: "Complete", createdAt: created)
+        try timer.start(at: created)
+        return try RecurrenceService().complete(timer, at: date)
+    }
+
+    func softDelete(_ id: UUID, at date: Date) async throws {}
+
+    func activePage(limit: Int, after cursor: TimerPageCursor?) async throws -> TimerPage {
+        TimerPage(timers: [], nextCursor: nil)
+    }
+
+    func historyCount(for timerID: UUID, limit: Int) async throws -> Int { 0 }
+
+    func successors(of occurrenceID: UUID, limit: Int) async throws -> [TimerItem] { [] }
+
+    func timer(id: UUID) async throws -> TimerItem {
+        try TimerItem.countdown(title: "Recovered", duration: 1, createdAt: .now)
     }
 }
