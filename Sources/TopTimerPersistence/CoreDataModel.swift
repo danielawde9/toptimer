@@ -6,6 +6,7 @@ final class TimerRecord: NSManagedObject {
     @NSManaged var id: UUID
     @NSManaged var occurrenceID: UUID
     @NSManaged var predecessorOccurrenceID: UUID?
+    @NSManaged var predecessorKey: String?
     @NSManaged var state: String
     @NSManaged var deadline: Date?
     @NSManaged var createdAt: Date
@@ -33,17 +34,21 @@ final class PresetRecord: NSManagedObject {
 }
 
 enum TopTimerCoreDataModel {
-    static let model: NSManagedObjectModel = {
-        let model = NSManagedObjectModel()
-        model.entities = [timerEntity(), historyEntity(), presetEntity()]
-        return model
-    }()
+    static let model = makeModel(identifier: "TopTimerModelV2", legacy: false)
+    static let v1Model = makeModel(identifier: "TopTimerModelV1", legacy: true)
 
-    private static func timerEntity() -> NSEntityDescription {
+    private static func makeModel(identifier: String, legacy: Bool) -> NSManagedObjectModel {
+        let model = NSManagedObjectModel()
+        model.versionIdentifiers = [identifier]
+        model.entities = [timerEntity(legacy: legacy), historyEntity(legacy: legacy), presetEntity(legacy: legacy)]
+        return model
+    }
+
+    private static func timerEntity(legacy: Bool) -> NSEntityDescription {
         let entity = NSEntityDescription()
         entity.name = "TimerRecord"
-        entity.managedObjectClassName = NSStringFromClass(TimerRecord.self)
-        entity.properties = [
+        entity.managedObjectClassName = legacy ? NSStringFromClass(NSManagedObject.self) : NSStringFromClass(TimerRecord.self)
+        var properties = [
             attribute("id", .UUIDAttributeType, optional: false),
             attribute("occurrenceID", .UUIDAttributeType, optional: false),
             attribute("predecessorOccurrenceID", .UUIDAttributeType, optional: true),
@@ -54,18 +59,25 @@ enum TopTimerCoreDataModel {
             attribute("deletedAt", .dateAttributeType, optional: true),
             attribute("payload", .binaryDataAttributeType, optional: false)
         ]
-        entity.uniquenessConstraints = [["id"], ["occurrenceID"], ["predecessorOccurrenceID"]]
+        if legacy {
+            properties.insert(attribute("predecessorKey", .stringAttributeType, optional: true), at: 3)
+        }
+        entity.properties = properties
+        entity.uniquenessConstraints = legacy
+            ? [["id"], ["occurrenceID"], ["predecessorKey"]]
+            : [["id"], ["occurrenceID"], ["predecessorOccurrenceID"]]
         entity.indexes = [
-            index("timer_active", entity, ["state", "deadline", "createdAt", "deletedAt"]),
-            index("timer_predecessor", entity, ["predecessorOccurrenceID"])
+            index("timer_active", entity, ["deletedAt", "state", "deadline", "createdAt", "id"]),
+            index("timer_active_page", entity, ["deletedAt", "state", "createdAt", "id"]),
+            index("timer_predecessor", entity, [legacy ? "predecessorKey" : "predecessorOccurrenceID"])
         ]
         return entity
     }
 
-    private static func historyEntity() -> NSEntityDescription {
+    private static func historyEntity(legacy: Bool) -> NSEntityDescription {
         let entity = NSEntityDescription()
         entity.name = "HistoryRecord"
-        entity.managedObjectClassName = NSStringFromClass(HistoryRecord.self)
+        entity.managedObjectClassName = legacy ? NSStringFromClass(NSManagedObject.self) : NSStringFromClass(HistoryRecord.self)
         entity.properties = [
             attribute("id", .UUIDAttributeType, optional: false),
             attribute("timerID", .UUIDAttributeType, optional: false),
@@ -75,14 +87,14 @@ enum TopTimerCoreDataModel {
             attribute("payload", .binaryDataAttributeType, optional: false)
         ]
         entity.uniquenessConstraints = [["id"], ["occurrenceID"]]
-        entity.indexes = [index("history_timeline", entity, ["timerID", "endedAt", "deletedAt"])]
+        entity.indexes = [index("history_timeline", entity, ["timerID", "deletedAt", "endedAt", "id"])]
         return entity
     }
 
-    private static func presetEntity() -> NSEntityDescription {
+    private static func presetEntity(legacy: Bool) -> NSEntityDescription {
         let entity = NSEntityDescription()
         entity.name = "PresetRecord"
-        entity.managedObjectClassName = NSStringFromClass(PresetRecord.self)
+        entity.managedObjectClassName = legacy ? NSStringFromClass(NSManagedObject.self) : NSStringFromClass(PresetRecord.self)
         entity.properties = [
             attribute("id", .UUIDAttributeType, optional: false),
             attribute("createdAt", .dateAttributeType, optional: false),

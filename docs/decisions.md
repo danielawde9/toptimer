@@ -173,3 +173,29 @@ unreadable.
 
 **If the client answers differently:** Dropping version-one compatibility is a
 data-retention decision and would require an explicit migration or reset flow.
+
+## 2026-09-05 — Superseding correction: version-one date semantics
+
+**Decision:** This supersedes the date-format sentence in **Canonical
+persistence timestamps**: version one used Foundation's default
+`deferredToDate` seconds since the reference date. Canonical version two uses
+explicit Unix milliseconds; both reads and the V1-to-V2 schema migration retain
+the original instant exactly.
+
+**Why:** Version one was committed before canonical encoding was introduced.
+Treating its reference seconds as Unix milliseconds corrupts recovered dates.
+
+**If the client answers differently:** Removing legacy reads requires an
+explicit data migration or a user-visible reset decision.
+
+## 2026-09-05 — Stored timer transition authority
+
+**Decision:** Repository updates reject stale snapshots and preserve occurrence,
+predecessor, successor, and terminal completion state; recurring completion is
+only performed through the atomic completion operation.
+
+**Why:** A stale running screen must not erase an already-created recurrence
+successor or its history entry.
+
+**If the client answers differently:** Allowing terminal restarts through a
+generic update needs a separate explicit transition API and concurrency policy.

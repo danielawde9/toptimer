@@ -2,15 +2,19 @@
 import Foundation
 
 public enum CoreDataStoreError: Error, Equatable, Sendable {
-    case persistentStoreLoadFailed(String)
+    case persistentStoreLoadFailed(domain: String, code: Int, description: String)
+    case migrationFailed(domain: String, code: Int, description: String)
+    case unsupportedStoreModel
 }
 
 public final class CoreDataStore: @unchecked Sendable {
     private let container: NSPersistentContainer
-    let context: NSManagedObjectContext
+    private let context: NSManagedObjectContext
 
-    private init(description: NSPersistentStoreDescription) async throws {
-        container = NSPersistentContainer(name: "TopTimer", managedObjectModel: TopTimerCoreDataModel.model)
+    // The context never leaves this object and every access is scheduled through
+    // perform(_:), which is the invariant behind this narrow unchecked boundary.
+    private init(description: NSPersistentStoreDescription, model: NSManagedObjectModel = TopTimerCoreDataModel.model) async throws {
+        container = NSPersistentContainer(name: "TopTimer", managedObjectModel: model)
         container.persistentStoreDescriptions = [description]
         try await Self.load(container: container)
         context = container.newBackgroundContext()
@@ -26,11 +30,22 @@ public final class CoreDataStore: @unchecked Sendable {
     }
 
     public static func sqlite(at url: URL) async throws -> CoreDataStore {
+        try migrateIfNeeded(at: url)
+        let description = sqliteDescription(at: url)
+        return try await CoreDataStore(description: description)
+    }
+
+    static func legacyV1SQLite(at url: URL) async throws -> CoreDataStore {
+        try await CoreDataStore(description: sqliteDescription(at: url), model: TopTimerCoreDataModel.v1Model)
+    }
+
+    static func sqliteDescription(at url: URL) -> NSPersistentStoreDescription {
         let description = NSPersistentStoreDescription(url: url)
         description.type = NSSQLiteStoreType
         description.shouldAddStoreAsynchronously = false
-        description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
-        return try await CoreDataStore(description: description)
+        description.shouldMigrateStoreAutomatically = true
+        description.shouldInferMappingModelAutomatically = true
+        return description
     }
 
     func perform<Value: Sendable>(
@@ -51,11 +66,66 @@ public final class CoreDataStore: @unchecked Sendable {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             container.loadPersistentStores { _, error in
                 if let error {
-                    continuation.resume(throwing: CoreDataStoreError.persistentStoreLoadFailed(error.localizedDescription))
+                    let failure = error as NSError
+                    continuation.resume(throwing: CoreDataStoreError.persistentStoreLoadFailed(
+                        domain: failure.domain,
+                        code: failure.code,
+                        description: failure.localizedDescription
+                    ))
                 } else {
                     continuation.resume()
                 }
             }
+        }
+    }
+
+    private static func migrateIfNeeded(at url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(ofType: NSSQLiteStoreType, at: url)
+            if TopTimerCoreDataModel.model.isConfiguration(withName: nil, compatibleWithStoreMetadata: metadata) {
+                return
+            }
+            guard TopTimerCoreDataModel.v1Model.isConfiguration(withName: nil, compatibleWithStoreMetadata: metadata) else {
+                throw CoreDataStoreError.unsupportedStoreModel
+            }
+            let mapping = try NSMappingModel.inferredMappingModel(
+                forSourceModel: TopTimerCoreDataModel.v1Model,
+                destinationModel: TopTimerCoreDataModel.model
+            )
+            let temporaryURL = url.deletingLastPathComponent()
+                .appendingPathComponent("TopTimer-migration-\(UUID().uuidString).sqlite")
+            defer { try? FileManager.default.removeItem(at: temporaryURL) }
+            let manager = NSMigrationManager(
+                sourceModel: TopTimerCoreDataModel.v1Model,
+                destinationModel: TopTimerCoreDataModel.model
+            )
+            try manager.migrateStore(
+                from: url,
+                sourceType: NSSQLiteStoreType,
+                options: nil,
+                with: mapping,
+                toDestinationURL: temporaryURL,
+                destinationType: NSSQLiteStoreType,
+                destinationOptions: nil
+            )
+            let coordinator = NSPersistentStoreCoordinator(managedObjectModel: TopTimerCoreDataModel.model)
+            try coordinator.replacePersistentStore(
+                at: url,
+                destinationOptions: nil,
+                withPersistentStoreFrom: temporaryURL,
+                sourceOptions: nil,
+                ofType: NSSQLiteStoreType
+            )
+        } catch let error as CoreDataStoreError {
+            throw error
+        } catch {
+            let failure = error as NSError
+            throw CoreDataStoreError.migrationFailed(
+                domain: failure.domain,
+                code: failure.code,
+                description: failure.localizedDescription
+            )
         }
     }
 }

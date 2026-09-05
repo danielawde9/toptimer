@@ -240,6 +240,15 @@ public extension TimerItem {
         lastTransitionAt = date
     }
 
+    mutating func softDelete(at date: Date) throws {
+        guard validTimerDate(date) else {
+            throw TimerTransitionError.invalidTimestamp
+        }
+        let temporalFloor = completedAt ?? lastTransitionAt ?? createdAt
+        try requireNotBefore(date, temporalFloor)
+        deletedAt = date
+    }
+
     func duplicate(at date: Date = .now) throws -> TimerItem {
         guard validTimerDate(date) else {
             throw TimerTransitionError.invalidTimestamp

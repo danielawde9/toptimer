@@ -7,6 +7,7 @@ public enum TimerRepositoryError: Error, Equatable, Sendable {
     case timerNotFound
     case unsupportedPayloadVersion(Int)
     case malformedPayload
+    case staleTimerUpdate
 }
 
 public protocol TimerRepository: Sendable {
@@ -160,6 +161,8 @@ public actor TimerCoreDataRepository: TimerRepository {
         try await store.perform { context in
             do {
                 let record = try Self.timerRecord(id: timer.id, in: context)
+                let stored = try TimerPayloadCodec.decodeTimer(record.payload)
+                try Self.validateUpdate(timer, against: stored)
                 try Self.apply(timer, to: record)
                 try context.save()
             } catch {
@@ -246,10 +249,9 @@ public actor TimerCoreDataRepository: TimerRepository {
         try await store.perform { context in
             do {
                 let record = try Self.timerRecord(id: id, in: context)
-                let payload = try Self.payloadWithDeletedDate(record.payload, date: date)
-                _ = try TimerPayloadCodec.decodeTimer(payload)
-                record.deletedAt = date
-                record.payload = payload
+                var timer = try TimerPayloadCodec.decodeTimer(record.payload)
+                try timer.softDelete(at: date)
+                try Self.apply(timer, to: record)
                 try context.save()
             } catch {
                 context.rollback()
@@ -288,7 +290,7 @@ public actor TimerCoreDataRepository: TimerRepository {
         }
     }
 
-    public func insertHistory(_ history: HistoryEntry) async throws {
+    func insertHistory(_ history: HistoryEntry) async throws {
         try await store.perform { context in
             do {
                 let record = HistoryRecord(context: context)
@@ -330,6 +332,36 @@ public actor TimerCoreDataRepository: TimerRepository {
         record.payload = try TimerPayloadCodec.encodeTimer(timer)
     }
 
+    private static func validateUpdate(_ incoming: TimerItem, against stored: TimerItem) throws {
+        guard incoming.id == stored.id,
+              incoming.occurrenceID == stored.occurrenceID,
+              incoming.predecessorOccurrenceID == stored.predecessorOccurrenceID,
+              incoming.successorID == stored.successorID else {
+            throw TimerRepositoryError.staleTimerUpdate
+        }
+
+        let incomingTransition = incoming.lastTransitionAt ?? incoming.createdAt
+        let storedTransition = stored.lastTransitionAt ?? stored.createdAt
+        guard incomingTransition >= storedTransition else {
+            throw TimerRepositoryError.staleTimerUpdate
+        }
+
+        switch stored.state {
+        case .completed:
+            guard incoming.state == .completed || incoming.state == .acknowledged else {
+                throw TimerRepositoryError.staleTimerUpdate
+            }
+        case .acknowledged, .cancelled:
+            guard incoming.state == stored.state else {
+                throw TimerRepositoryError.staleTimerUpdate
+            }
+        case .idle, .running, .paused:
+            guard incoming.state != .completed else {
+                throw TimerRepositoryError.staleTimerUpdate
+            }
+        }
+    }
+
     private static func apply(_ history: HistoryEntry, to record: HistoryRecord) throws {
         record.id = history.id
         record.timerID = history.timerID
@@ -362,16 +394,4 @@ public actor TimerCoreDataRepository: TimerRepository {
         )
     }
 
-    private static func payloadWithDeletedDate(_ data: Data, date: Date) throws -> Data {
-        guard var envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let encoded = envelope["payload"] as? String,
-              let payload = Data(base64Encoded: encoded),
-              var timer = try JSONSerialization.jsonObject(with: payload) as? [String: Any] else {
-            throw TimerRepositoryError.malformedPayload
-        }
-        timer["deletedAt"] = date.timeIntervalSince1970 * 1_000
-        let timerData = try JSONSerialization.data(withJSONObject: timer, options: [.sortedKeys])
-        envelope["payload"] = timerData.base64EncodedString()
-        return try JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys])
-    }
 }

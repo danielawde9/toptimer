@@ -14,6 +14,30 @@ final class TimerRepositoryTests: XCTestCase {
         _ = repository
     }
 
+    func testSQLiteDescriptionDoesNotEnableUnusedPersistentHistoryTracking() {
+        let description = CoreDataStore.sqliteDescription(
+            at: FileManager.default.temporaryDirectory.appendingPathComponent("TopTimer.sqlite")
+        )
+        XCTAssertNil(description.options[NSPersistentHistoryTrackingKey])
+    }
+
+    func testUnsupportedStoreMetadataFailsWithStructuredMigrationError() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        do {
+            _ = try await CoreDataStore.sqlite(at: directory)
+            XCTFail("Expected a directory to be rejected as an unsupported SQLite store")
+        } catch let error as CoreDataStoreError {
+            guard case let .migrationFailed(domain, _, description) = error else {
+                return XCTFail("Expected structured migration failure, got \(error)")
+            }
+            XCTAssertFalse(domain.isEmpty)
+            XCTAssertFalse(description.isEmpty)
+        }
+    }
+
     func testCompletionIsAtomicAndRetryCreatesOneHistoryAndSuccessor() async throws {
         let repository = try await repository()
         var timer = try countdown(recurrence: .interval(seconds: 300))
@@ -31,6 +55,43 @@ final class TimerRepositoryTests: XCTestCase {
         let successorCount = try await repository.successors(of: timer.occurrenceID).count
         XCTAssertEqual(historyCount, 1)
         XCTAssertEqual(successorCount, 1)
+    }
+
+    func testStaleRunningUpdateCannotRollbackCompletedRecurringSource() async throws {
+        let repository = try await repository()
+        var source = try countdown(recurrence: .interval(seconds: 300))
+        try source.start(at: created)
+        _ = try await repository.insert(source)
+        let stale = try await repository.timer(id: source.id)
+
+        let outcome = try await repository.complete(source.id, at: completed)
+        await XCTAssertThrowsErrorAsync({ try await repository.update(stale) }, matching: .staleTimerUpdate)
+
+        let persisted = try await repository.timer(id: source.id)
+        let historyCount = try await repository.historyCount(for: source.id)
+        let successorCount = try await repository.successors(of: source.occurrenceID).count
+        XCTAssertEqual(persisted, outcome.completed)
+        XCTAssertEqual(historyCount, 1)
+        XCTAssertEqual(successorCount, 1)
+    }
+
+    func testUpdatePermitsForwardDomainTransitionsAndMetadataChanges() async throws {
+        let repository = try await repository()
+        var timer = try countdown()
+        _ = try await repository.insert(timer)
+        try timer.updateMetadata(title: "Edited", details: "Metadata", tags: ["work"])
+        try await repository.update(timer)
+        try timer.start(at: created)
+        try await repository.update(timer)
+        try timer.pause(at: created.addingTimeInterval(10))
+        try await repository.update(timer)
+        try timer.resume(at: created.addingTimeInterval(20))
+        try await repository.update(timer)
+        try timer.cancel(at: created.addingTimeInterval(30))
+        try await repository.update(timer)
+
+        let persisted = try await repository.timer(id: timer.id)
+        XCTAssertEqual(persisted, timer)
     }
 
     func testSecondSuccessorForOnePredecessorIsRejectedByDatabase() async throws {
@@ -125,6 +186,48 @@ final class TimerRepositoryTests: XCTestCase {
         let recovered = try await repository.active(limit: 10)
         XCTAssertEqual(recovered, [active])
         let historyCount = try await repository.historyCount(for: done.id)
+        XCTAssertEqual(historyCount, 1)
+    }
+
+    func testVersionOneSQLiteMigratesWithoutLosingTimerOrHistory() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("TopTimer.sqlite")
+        let timer = try countdown()
+        let history = try HistoryEntry(
+            timerID: timer.id,
+            occurrenceID: timer.occurrenceID,
+            title: timer.title,
+            kind: timer.kind,
+            endedAt: completed,
+            elapsedSeconds: 60,
+            completionReason: .finished
+        )
+        let timerPayload = try legacyEnvelope(payload: JSONEncoder().encode(timer))
+        let historyPayload = try legacyEnvelope(payload: JSONEncoder().encode(history))
+
+        let legacyStore = try await CoreDataStore.legacyV1SQLite(at: url)
+        try await legacyStore.perform { context in
+            let timerRecord = NSEntityDescription.insertNewObject(forEntityName: "TimerRecord", into: context)
+            timerRecord.setValue(timer.id, forKey: "id")
+            timerRecord.setValue(timer.occurrenceID, forKey: "occurrenceID")
+            timerRecord.setValue(timer.state.rawValue, forKey: "state")
+            timerRecord.setValue(timer.createdAt, forKey: "createdAt")
+            timerRecord.setValue(timerPayload, forKey: "payload")
+            let historyRecord = NSEntityDescription.insertNewObject(forEntityName: "HistoryRecord", into: context)
+            historyRecord.setValue(history.id, forKey: "id")
+            historyRecord.setValue(history.timerID, forKey: "timerID")
+            historyRecord.setValue(history.occurrenceID, forKey: "occurrenceID")
+            historyRecord.setValue(history.endedAt, forKey: "endedAt")
+            historyRecord.setValue(historyPayload, forKey: "payload")
+            try context.save()
+        }
+
+        let repository = TimerCoreDataRepository(store: try await CoreDataStore.sqlite(at: url), calendar: utcCalendar)
+        let recovered = try await repository.timer(id: timer.id)
+        let historyCount = try await repository.historyCount(for: timer.id)
+        XCTAssertEqual(recovered, timer)
         XCTAssertEqual(historyCount, 1)
     }
 
@@ -265,6 +368,31 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertEqual(recovered.deletedAt, completed)
     }
 
+    func testSoftDeleteReencodesLegacyVersionOneTimerAsCanonicalVersionTwo() async throws {
+        let fixture = try await sqliteFixture()
+        defer { fixture.removeFiles() }
+        let timer = try countdown()
+        let legacyPayload = try legacyEnvelope(payload: JSONEncoder().encode(timer))
+        try await fixture.store.perform { context in
+            let record = TimerRecord(context: context)
+            record.id = timer.id
+            record.occurrenceID = timer.occurrenceID
+            record.state = timer.state.rawValue
+            record.createdAt = timer.createdAt
+            record.payload = legacyPayload
+            try context.save()
+        }
+
+        try await fixture.repository.softDelete(timer.id, at: completed)
+
+        let recovered = try await fixture.repository.timer(id: timer.id)
+        let payload = try await fixture.store.perform { context in
+            try rawTimerPayload(id: timer.id, in: context)
+        }
+        XCTAssertEqual(recovered.deletedAt, completed)
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: payload) as? [String: Any])?["version"] as? Int, 2)
+    }
+
     func testProtocolExistentialExposesEveryPersistenceOperation() async throws {
         let repository: any TimerRepository = ProtocolRepositoryFake()
         let timer = try countdown()
@@ -377,6 +505,14 @@ private func insertRawTimer(
     record.completedAt = timer.completedAt
     record.deletedAt = timer.deletedAt
     record.payload = try TimerPayloadCodec.encodeTimer(timer)
+}
+
+private func rawTimerPayload(id: UUID, in context: NSManagedObjectContext) throws -> Data {
+    let request = NSFetchRequest<TimerRecord>(entityName: "TimerRecord")
+    request.predicate = NSPredicate(format: "id == %@", id as NSUUID)
+    request.fetchLimit = 1
+    request.sortDescriptors = [NSSortDescriptor(key: "id", ascending: true)]
+    return try XCTUnwrap(context.fetch(request).first?.payload)
 }
 
 private actor ProtocolRepositoryFake: TimerRepository {
