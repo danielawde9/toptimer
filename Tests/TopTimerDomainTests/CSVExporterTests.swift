@@ -27,4 +27,22 @@ final class CSVExporterTests: XCTestCase {
         )
         XCTAssertEqual(Array(csv.utf8), Array(Data(csv.utf8)))
     }
+
+    func testAcceptsTenThousandEntriesAndRejectsTenThousandAndOne() throws {
+        let entry = try HistoryEntry(
+            timerID: UUID(),
+            occurrenceID: UUID(),
+            title: "Focus",
+            kind: .countdown,
+            endedAt: .now,
+            elapsedSeconds: 1,
+            completionReason: .finished
+        )
+        let exporter = CSVExporter()
+
+        XCTAssertTrue(try exporter.export(Array(repeating: entry, count: CSVExporter.maximumEntries)).hasPrefix("id,title,"))
+        XCTAssertThrowsError(try exporter.export(Array(repeating: entry, count: CSVExporter.maximumEntries + 1))) { error in
+            XCTAssertEqual(error as? CSVExporterError, .tooManyEntries)
+        }
+    }
 }

@@ -49,7 +49,13 @@ final class HistoryAnalyticsTests: XCTestCase {
         XCTAssertEqual(try analytics.totalsByDay(entries), [day: 90])
         XCTAssertEqual(try analytics.totalsByWeek(entries), [day: 90])
         XCTAssertEqual(try analytics.totalsByTimer(entries), [first.timerID: 90])
-        XCTAssertEqual(try analytics.totalsByTag(entries), ["Shared": 60, "Work": 90])
+        XCTAssertEqual(try analytics.totalsByTag(entries), ["shared": 60, "work": 90])
+    }
+
+    func testGroupsEachNormalizedTagAtMostOncePerEntry() throws {
+        let entry = try self.entry(title: "Focus", tags: ["Work", "work", " WÓRK "], elapsed: 60)
+
+        XCTAssertEqual(try HistoryAnalytics(calendar: utcCalendar).totalsByTag([entry]), ["work": 60])
     }
 
     private var utcCalendar: Calendar {

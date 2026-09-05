@@ -40,8 +40,12 @@ public struct HistoryAnalytics: Sendable {
         try validate(entries)
         var results: [String: TimeInterval] = [:]
         for entry in entries {
+            var seenTags = Set<String>()
             for tag in entry.tags {
-                results[tag, default: 0] += entry.elapsedSeconds
+                let normalizedTag = normalize(tag)
+                if seenTags.insert(normalizedTag).inserted {
+                    results[normalizedTag, default: 0] += entry.elapsedSeconds
+                }
             }
         }
         return results

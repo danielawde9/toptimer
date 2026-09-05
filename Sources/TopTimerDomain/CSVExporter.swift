@@ -1,6 +1,12 @@
 import Foundation
 
+public enum CSVExporterError: Error, Equatable, Sendable {
+    case tooManyEntries
+}
+
 public struct CSVExporter {
+    public static let maximumEntries = HistoryAnalytics.maximumEntries
+
     private static let columns = [
         "id", "title", "description", "tags", "kind", "started_at", "ended_at", "elapsed_seconds", "reason"
     ]
@@ -8,6 +14,7 @@ public struct CSVExporter {
     public init() {}
 
     public func export(_ entries: [HistoryEntry]) throws -> String {
+        guard entries.count <= Self.maximumEntries else { throw CSVExporterError.tooManyEntries }
         let formatter = ISO8601DateFormatter()
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

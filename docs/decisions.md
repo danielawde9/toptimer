@@ -214,3 +214,16 @@ given record export reproducibly.
 **If the client answers differently:** Larger reports or retention batches need
 cursor-driven aggregation/cleanup, and a different tag encoding needs a new
 documented CSV contract for importers.
+
+## 2026-09-05 — Normalized history tag totals and CSV report cap
+
+**Decision:** Tag totals use a case-, diacritic-, and width-insensitive normalized
+tag key, counting that key no more than once per history entry. CSV export uses
+the same 10,000-entry maximum as analytics and rejects a larger input before
+allocating its row collection.
+
+**Why:** Repeated forms of the same tag should not inflate a single record's
+reported time, and report generation has an explicit memory bound.
+
+**If the client answers differently:** Display-preserving tag groups require a
+separate canonical-label policy, and larger exports need a streaming API.
