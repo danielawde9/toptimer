@@ -370,6 +370,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
         self.details = details
         self.tags = tags
     }
+    public mutating func restore(at date: Date) throws { guard deletedAt != nil, date.timeIntervalSinceReferenceDate.isFinite else { throw TimerTransitionError.invalidState }; try preflightRevisionIncrement(); deletedAt = nil; try incrementRevision() }
 
     /// Reconfiguration has one durable revision. A running countdown starts a
     /// fresh full-duration schedule at `at`; paused and idle countdowns retain

@@ -410,6 +410,7 @@ final class AppStateTests: XCTestCase {
 }
 
 actor RecordingRepository: TimerRepository {
+    func restore(_ id: UUID, at date: Date) async throws { operations.append("restore") }
     var operations: [String] = []
     var requestedActiveLimits: [Int] = []
     private var timers: [UUID: TimerItem] = [:]

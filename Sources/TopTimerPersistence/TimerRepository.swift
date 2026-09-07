@@ -26,6 +26,7 @@ public protocol TimerRepository: Sendable {
     func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome
     func cancel(id: UUID, at date: Date) async throws -> TimerItem
     func softDelete(_ id: UUID, at date: Date) async throws
+    func restore(_ id: UUID, at date: Date) async throws
     func historyPage(from: Date?, through: Date?, query: String, limit: Int, after cursor: HistoryPageCursor?) async throws -> HistoryPage
     func updateHistory(_ history: HistoryEntry) async throws
     func softDeleteHistory(_ id: UUID, at date: Date) async throws
@@ -360,6 +361,7 @@ public actor TimerCoreDataRepository: TimerRepository {
             }
         }
     }
+    public func restore(_ id: UUID, at date: Date) async throws { try await store.perform { context in do { let record = try Self.timerRecord(id: id, in: context); var timer = try TimerPayloadCodec.decodeTimer(record.payload); try timer.restore(at: date); try Self.apply(timer, to: record); try context.save() } catch { context.rollback(); throw error } } }
 
     public func historyPage(
         from: Date?,

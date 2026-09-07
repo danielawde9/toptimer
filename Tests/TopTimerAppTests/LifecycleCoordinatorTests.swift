@@ -25,4 +25,9 @@ final class LifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.requestTermination(), [])
         XCTAssertEqual(coordinator.quitAfterCloseFailure(), [.replyToTermination(true)])
     }
+    func testRetryAfterCloseFailureRepliesOnlyAfterSuccess() {
+        var coordinator = LifecycleCoordinator(); _ = coordinator.startResult(.success); _ = coordinator.requestTermination()
+        XCTAssertEqual(coordinator.closeResult(.failure), [.reportCloseFailure])
+        XCTAssertEqual(coordinator.closeResult(.success), [.replyToTermination(true)])
+    }
 }
