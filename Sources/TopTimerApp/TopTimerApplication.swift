@@ -11,6 +11,7 @@ import TopTimerSystem
   private var refreshTimer: Timer?
   private var store: CoreDataStore?
   private var hotKeys: GlobalHotKeyController?
+  private let loginItem = LoginItemController()
   private var failureController: StartupFailureController?
   private var closeFailureController: CloseFailureController?
   private var lifecycle = LifecycleCoordinator()
@@ -88,13 +89,18 @@ import TopTimerSystem
       else { newStore = try await CoreDataStore.sqlite(at: folder.appendingPathComponent("TopTimer.sqlite")) }
       store = newStore
       guard operations.accepting else { return }
+      let soundController = AlertSoundController()
       let state = AppState(
         repository: TimerCoreDataRepository(store: newStore),
         notifications: NotificationController(), presets: PresetCoreDataRepository(store: newStore),
-        alertSounds: AlertSoundController(), operations: operations)
+        alertSounds: soundController, operations: operations)
       await state.load()
       guard operations.accepting else { return }
-      let controller = StatusBarController(state: state)
+      let controller = StatusBarController(
+        state: state,
+        updateHotKey: { [weak self] slot, shortcut in self?.replaceHotKey(shortcut, for: slot) },
+        updateLogin: { [weak self] enabled in self?.setLogin(enabled: enabled) },
+        importSound: { url in try await soundController.importSound(from: url).lastPathComponent })
       let keys = GlobalHotKeyController(
         quickEntry: { [weak controller] in controller?.openFromShortcut() },
         pauseResumePriority: { [weak state] in
@@ -132,6 +138,14 @@ import TopTimerSystem
     failureController?.shutdown()
     failureController = nil
     operations.submit { await self.start() }
+  }
+  private func replaceHotKey(_ shortcut: Shortcut, for slot: HotKeySlot) -> String? {
+    do { try hotKeys?.register(shortcut, for: slot); return nil }
+    catch { return "Could not use that shortcut. The previous shortcut is unchanged." }
+  }
+  private func setLogin(enabled: Bool) -> String? {
+    do { try loginItem.setEnabled(enabled); return nil }
+    catch { return "Could not change launch at login. Open System Settings and try again." }
   }
   private func shutdownResources() {
     refreshTimer?.invalidate()

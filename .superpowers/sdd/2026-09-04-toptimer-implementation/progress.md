@@ -6,7 +6,8 @@
 - Task 7: complete at `79f021a` (notifications and sounds).
 - Task 8: complete at `95b0140` (hotkeys, login, sleep assertions).
 - Task 9: complete at `50d921d` (application state and relaunch recovery).
-- Task 10: fix round 1 in progress from base `340e8f5` after spec review.
+- Task 10: complete at `0191ad9` after specification and quality approval; 224 tests passed.
+- Task 11: complete; retained windows, bounded history/reports, and settings added.
 
 ## Resume ruling
 

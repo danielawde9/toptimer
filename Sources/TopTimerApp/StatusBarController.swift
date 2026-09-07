@@ -2,17 +2,25 @@ import AppKit
 import Combine
 import SwiftUI
 import TopTimerDomain
+import TopTimerSystem
 
 @MainActor public final class StatusBarController: NSObject, NSPopoverDelegate {
   private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
   private let sounds = SoundCatalogState()
   private let popover = NSPopover()
   private let state: AppState
+  private let windows = WindowCoordinator()
+  private let updateHotKey: (HotKeySlot, Shortcut) -> String?
+  private let updateLogin: (Bool) -> String?
+  private let importSound: (URL) async throws -> String
   private var subscriptions = Set<AnyCancellable>()
   private var showingList = false
   private var shortcutOrigin: NSRunningApplication?
-  public init(state: AppState) {
+  public init(state: AppState, updateHotKey: @escaping (HotKeySlot, Shortcut) -> String? = { _, _ in nil }, updateLogin: @escaping (Bool) -> String? = { _ in nil }, importSound: @escaping (URL) async throws -> String = { _ in throw CocoaError(.fileReadUnsupportedScheme) }) {
     self.state = state
+    self.updateHotKey = updateHotKey
+    self.updateLogin = updateLogin
+    self.importSound = importSound
     super.init()
     popover.behavior = .transient
     popover.delegate = self
@@ -29,6 +37,7 @@ import TopTimerDomain
   }
   public func shutdown() {
     subscriptions.removeAll()
+    windows.closeAll()
     NSStatusBar.system.removeStatusItem(item)
   }
   @objc public func toggle() { popover.isShown ? close() : open() }
@@ -38,7 +47,9 @@ import TopTimerDomain
       PopoverRoot(
         state: state, sounds: sounds, showingList: showingList,
         onListChange: { [weak self] value in self?.showingList = value },
-        closePopover: { [weak self] in self?.close() }))
+        closePopover: { [weak self] in self?.close() },
+        openSettings: { [weak self] in self?.openSettings() },
+        openTimerList: { [weak self] in self?.openTimerList() }))
     popover.contentViewController = NSHostingController(rootView: root)
     guard let button = item.button else { return }
     popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
@@ -49,6 +60,23 @@ import TopTimerDomain
     open()
   }
   public func close() { popover.performClose(nil) }
+  private func openSettings() {
+    windows.show(kind: .settings) {
+      SettingsView(
+        settings: Binding(get: { self.state.preferences }, set: { self.state.preferences = $0 }),
+        notificationDenied: self.state.notificationStatus == .authorizationDenied
+          || self.state.notificationStatus == .notAuthorized(.denied),
+        updateHotKey: self.updateHotKey, updateLogin: self.updateLogin,
+        importSound: self.importSound, operations: self.state.operations)
+    }
+  }
+  private func openTimerList() {
+    windows.show(kind: .timerList) {
+      TimerListView(state: self.state, openHistory: { [weak self] in self?.openHistory() }, openReports: { [weak self] in self?.openReports() })
+    }
+  }
+  private func openHistory() { windows.show(kind: .history) { HistoryView(state: self.state) } }
+  private func openReports() { windows.show(kind: .reports) { ReportsView(state: self.state) } }
   public func popoverDidClose(_ notification: Notification) {
     if let origin = shortcutOrigin {
       origin.activate(options: [])
@@ -72,9 +100,11 @@ private struct PopoverRoot: View {
   @State var showingList: Bool
   let onListChange: (Bool) -> Void
   let closePopover: () -> Void
+  let openSettings: () -> Void
+  let openTimerList: () -> Void
   var body: some View {
     VStack(spacing: 0) {
-      QuickEntryView(state: state, showingList: $showingList, closePopover: closePopover)
+      QuickEntryView(state: state, showingList: $showingList, closePopover: closePopover, openSettings: openSettings, openTimerList: openTimerList)
       if showingList {
         Divider()
         TimerListView(state: state)

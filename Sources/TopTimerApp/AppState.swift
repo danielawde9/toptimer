@@ -45,6 +45,8 @@ public final class AppState: ObservableObject {
     @Published public private(set) var priorityTimer: TimerItem?
     @Published public private(set) var selectedEditorTimer: TimerItem?
     @Published public private(set) var historyPage = HistoryPage(entries: [], nextCursor: nil)
+    @Published public private(set) var recentlyDeletedHistory: [HistoryEntry] = []
+    @Published public private(set) var historyLoading = false
     @Published public private(set) var suggestions: [String] = []
     @Published public var preferences = AppPreferences()
     private var refreshing = false
@@ -164,8 +166,32 @@ public final class AppState: ObservableObject {
     }
 
     public func loadHistory() async {
-        do { historyPage = try await repository.historyPage(from: nil, through: nil, query: "", limit: 100, after: nil) }
+        await loadHistory(from: nil, through: nil, query: "", append: false)
+    }
+
+    public func loadHistory(from: Date?, through: Date?, query: String, append: Bool = false) async {
+        guard !historyLoading else { return }
+        historyLoading = true
+        defer { historyLoading = false }
+        let cursor = append ? historyPage.nextCursor : nil
+        do {
+            let page = try await repository.historyPage(
+                from: from, through: through, query: query,
+                limit: min(200, max(1, preferences.historyPageSize)), after: cursor)
+            let entries = append ? Array((historyPage.entries + page.entries).prefix(200)) : page.entries
+            historyPage = HistoryPage(entries: entries, nextCursor: entries.count < 200 ? page.nextCursor : nil)
+        }
         catch { inlineError = "Could not load timer history." }
+    }
+
+    @discardableResult public func editHistory(_ entry: HistoryEntry, title: String, details: String, tags: [String]) async -> Bool {
+        do { var edited = entry; try edited.updateMetadata(title: title, details: details, tags: tags); try await repository.updateHistory(edited); await loadHistory(); return true }
+        catch { inlineError = "Could not save history changes. Review the fields and try again."; return false }
+    }
+
+    @discardableResult public func deleteHistory(_ entry: HistoryEntry) async -> Bool {
+        do { try await repository.softDeleteHistory(entry.id, at: now()); recentlyDeletedHistory = Array(([entry] + recentlyDeletedHistory).prefix(200)); await loadHistory(); return true }
+        catch { inlineError = "Could not delete this history record. Try again."; return false }
     }
 
     public func refreshSuggestions(query: String) async {
@@ -223,7 +249,7 @@ public final class AppState: ObservableObject {
 
     /// Recovers the repository's supported history record; active timers are not recovered.
     @discardableResult public func recoverHistory(_ id: UUID) async -> Bool {
-        do { try await repository.recoverHistory(id); await loadHistory(); await publishActive(); return true }
+        do { try await repository.recoverHistory(id); recentlyDeletedHistory.removeAll { $0.id == id }; await loadHistory(); await publishActive(); return true }
         catch { inlineError = "Could not recover timer history."; return false }
     }
 
@@ -299,14 +325,4 @@ public final class AppState: ObservableObject {
         do { notificationStatus = try await notifications.schedule(timer) }
         catch { notificationStatus = nil; inlineError = "Timer saved, but notification scheduling failed." }
     }
-}
-
-public struct AppPreferences: Equatable, Sendable {
-    public var statusDisplayMode: StatusDisplayMode = .compact
-    public var showsStatusIcon = true
-    public var snoozeSeconds: TimeInterval {
-        didSet { snoozeSeconds = Self.clamped(snoozeSeconds) }
-    }
-    public init(snoozeSeconds: TimeInterval = 300) { self.snoozeSeconds = Self.clamped(snoozeSeconds) }
-    static func clamped(_ value: TimeInterval) -> TimeInterval { min(86_400, max(60, value)) }
 }

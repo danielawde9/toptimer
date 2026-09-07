@@ -5,14 +5,17 @@ public struct QuickEntryView: View {
   @ObservedObject var state: AppState
   @State private var focused = false
   @State private var selectedSuggestion = 0
-  @State private var showingSettings = false
   @Binding var showingList: Bool
   let closePopover: () -> Void
-  public init(state: AppState, showingList: Binding<Bool>, closePopover: @escaping () -> Void = {})
+  let openSettings: (() -> Void)?
+  let openTimerList: (() -> Void)?
+  public init(state: AppState, showingList: Binding<Bool>, closePopover: @escaping () -> Void = {}, openSettings: (() -> Void)? = nil, openTimerList: (() -> Void)? = nil)
   {
     self.state = state
     _showingList = showingList
     self.closePopover = closePopover
+    self.openSettings = openSettings
+    self.openTimerList = openTimerList
   }
   public var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -29,7 +32,7 @@ public struct QuickEntryView: View {
       suggestions
       HStack(spacing: 6) {
         Button {
-          showingSettings = true
+          openSettings?()
         } label: {
           Image(systemName: "gearshape").frame(width: 28, height: 28).contentShape(Rectangle())
         }.help("Settings").accessibilityLabel("Settings")
@@ -38,7 +41,7 @@ public struct QuickEntryView: View {
         }.keyboardShortcut(.return, modifiers: []).help("Run timer (Return)").accessibilityLabel(
           "Run timer")
         Button {
-          showingList.toggle()
+          if let openTimerList { openTimerList() } else { showingList.toggle() }
         } label: {
           Image(systemName: "list.bullet").frame(width: 28, height: 28).contentShape(Rectangle())
         }.help("Show timers").accessibilityLabel("Show timers")
@@ -52,7 +55,7 @@ public struct QuickEntryView: View {
     }.frame(width: 260).onAppear { focused = true }.onChange(of: state.quickEntryText) { text in
       selectedSuggestion = 0
       state.perform { await state.refreshSuggestions(query: text) }
-    }.sheet(isPresented: $showingSettings) { SettingsPanel(preferences: $state.preferences) }
+    }
   }
   private func handle(_ effect: QuickEntryEffect) {
     switch effect {
@@ -95,19 +98,5 @@ public struct QuickEntryView: View {
       run()
     }.buttonStyle(.plain).padding(.horizontal, 8).background(
       index == selectedSuggestion ? Color.accentColor.opacity(0.16) : Color.clear)
-  }
-}
-
-private struct SettingsPanel: View {
-  @Binding var preferences: AppPreferences
-  var body: some View {
-    Form {
-      Toggle("Show menu bar icon", isOn: $preferences.showsStatusIcon)
-      Picker("Timer display", selection: $preferences.statusDisplayMode) {
-        Text("Compact").tag(StatusDisplayMode.compact)
-        Text("Seconds").tag(StatusDisplayMode.seconds)
-        Text("Clock").tag(StatusDisplayMode.clock)
-      }
-    }.padding().frame(width: 300).accessibilityLabel("TopTimer settings")
   }
 }

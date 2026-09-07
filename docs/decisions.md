@@ -425,3 +425,21 @@ acknowledged rows without mutation.
 measurement; timed shutdown must leave storage open when drainage times out.
 Restoring acknowledged timers would need an explicit domain restart/recovery rule,
 not removal of the archive timestamp alone.
+
+## 2026-09-07 — Task 11 bounded auxiliary windows and reporting
+
+**Decision:** Timer list, history, reports, and settings are separate retained native
+windows with at most one controller per kind. Reopening raises the existing controller;
+closing removes only that window's hosted SwiftUI hierarchy. History and report screens
+request repository pages capped at 200 rows, and CSV export is limited to the currently
+loaded bounded result. Recently deleted history is retained as a bounded in-session
+recovery list after a successful soft delete.
+
+**Why:** This keeps storage and application lifetime under AppState and the shared bounded
+operation owner, avoids unbounded export/report accumulation, and preserves the approved
+plain native table/form visual language.
+
+**If the client answers differently:** Exporting an entire multi-page range requires a
+streaming repository/export protocol. Recovering history deleted before the current launch
+requires a bounded repository query that includes tombstones. Persisting preferences across
+launches requires a versioned settings store rather than ad-hoc UserDefaults keys.

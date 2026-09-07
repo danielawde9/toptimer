@@ -10,9 +10,13 @@ public struct TimerRowActionVisibility: Equatable, Sendable {
 public struct TimerListView: View {
   @ObservedObject var state: AppState
   @State private var recentlyDeleted = false
-  public init(state: AppState, recentlyDeleted: Bool = false) {
+  private let openHistory: (() -> Void)?
+  private let openReports: (() -> Void)?
+  public init(state: AppState, recentlyDeleted: Bool = false, openHistory: (() -> Void)? = nil, openReports: (() -> Void)? = nil) {
     self.state = state
     _recentlyDeleted = State(initialValue: recentlyDeleted)
+    self.openHistory = openHistory
+    self.openReports = openReports
   }
   public var body: some View {
     VStack(spacing: 0) {
@@ -20,6 +24,9 @@ public struct TimerListView: View {
         Text("Timers").tag(false)
         Text("Recently Deleted").tag(true)
       }.pickerStyle(.segmented).labelsHidden().padding(8)
+      if openHistory != nil || openReports != nil {
+        HStack { Button("History", systemImage: "clock.arrow.circlepath") { openHistory?() }; Button("Reports", systemImage: "chart.bar") { openReports?() }; Spacer() }.padding(.horizontal, 8)
+      }
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {
           if recentlyDeleted {
