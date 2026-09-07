@@ -20,16 +20,27 @@ final class AlertSoundControllerTests: XCTestCase {
         XCTAssertEqual(volumes, [1, 1])
         XCTAssertEqual(played, [imported, nil])
     }
+    func testFilesystemFailuresBecomeTypedErrors() async throws {
+        let source = URL(fileURLWithPath: "/ok.wav")
+        for failure in ["kind", "size", "directory", "copy"] {
+            let files = SoundFileStoreSpy(files: ["ok.wav": .regular(data: Data())], failure: failure)
+            let controller = AlertSoundController(files: files, player: SoundPlayerSpy())
+            do { _ = try await controller.importSound(from: source); XCTFail("Expected typed error") }
+            catch let error as AlertSoundError { XCTAssertFalse(error.localizedDescription.isEmpty) }
+            catch { XCTFail("Expected AlertSoundError") }
+        }
+    }
 }
 
 actor SoundFileStoreSpy: SoundFileStore {
     let files: [String: SoundFileKind]; let sizes: [String: Int]
     var copies: [(URL, URL)] = []
-    init(files: [String: SoundFileKind], sizes: [String: Int] = [:]) { self.files = files; self.sizes = sizes }
-    func kind(at url: URL) async throws -> SoundFileKind { files[url.lastPathComponent] ?? .missing }
-    func size(at url: URL) async throws -> Int { sizes[url.lastPathComponent] ?? (files[url.lastPathComponent]?.data?.count ?? 0) }
-    func applicationSupportSoundsDirectory() async throws -> URL { URL(fileURLWithPath: "/sounds") }
-    func copy(_ source: URL, to destination: URL) async throws { copies.append((source, destination)) }
+    let failure: String?
+    init(files: [String: SoundFileKind], sizes: [String: Int] = [:], failure: String? = nil) { self.files = files; self.sizes = sizes; self.failure = failure }
+    func kind(at url: URL) async throws -> SoundFileKind { if failure == "kind" { throw CocoaError(.fileReadUnknown) }; return files[url.lastPathComponent] ?? .missing }
+    func size(at url: URL) async throws -> Int { if failure == "size" { throw CocoaError(.fileReadUnknown) }; return sizes[url.lastPathComponent] ?? (files[url.lastPathComponent]?.data?.count ?? 0) }
+    func applicationSupportSoundsDirectory() async throws -> URL { if failure == "directory" { throw CocoaError(.fileNoSuchFile) }; return URL(fileURLWithPath: "/sounds") }
+    func copy(_ source: URL, to destination: URL) async throws { if failure == "copy" { throw CocoaError(.fileWriteUnknown) }; copies.append((source, destination)) }
 }
 actor SoundPlayerSpy: SoundPlayer {
     let customResult: Bool; var volumes: [Double] = []; var played: [URL?] = []

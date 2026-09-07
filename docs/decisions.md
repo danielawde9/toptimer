@@ -17,7 +17,9 @@ sound.
 
 **Why:** Stable identifiers make cancellation and action routing safe, bounded
 ownership prevents TopTimer from affecting other apps' notifications, and the
-file limits avoid unsafe or unexpectedly expensive local imports.
+file limits avoid unsafe or unexpectedly expensive local imports. “Oldest” means
+the earliest scheduled trigger date, with request identifier as the deterministic
+tie-breaker; pending notification inspection has a 4,096-request safety cap.
 
 **If the client answers differently:** More pending alerts, extra formats,
 different snooze limits, or a different fallback sound require matching UI,

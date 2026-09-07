@@ -11,9 +11,17 @@ final class NotificationControllerTests: XCTestCase {
         let request = await center.requests.single
         XCTAssertEqual(request?.identifier, "timer-\(id.uuidString)")
         XCTAssertEqual(request?.categoryIdentifier, NotificationController.categoryIdentifier)
-        XCTAssertLessThanOrEqual(request?.body.unicodeScalars.count ?? .max, 120)
+        XCTAssertLessThanOrEqual(request?.body.count ?? .max, 120)
         let categoryCount = await center.categories.count
         XCTAssertEqual(categoryCount, 1)
+    }
+
+    func testTruncationKeepsOneHundredTwentyWholeFamilyEmojiCharacters() async throws {
+        let center = NotificationCenterSpy(status: .authorized)
+        _ = try await NotificationController(center: center).schedule(timerID: UUID(), title: "x", details: String(repeating: "👨‍👩‍👧‍👦", count: 121), fireDate: .now)
+        let request = await center.requests.single
+        XCTAssertEqual(request?.body.count, 120)
+        XCTAssertEqual(request?.body.last, "👨‍👩‍👧‍👦")
     }
 
     func testDeniedDoesNotSchedule() async throws {
@@ -38,6 +46,24 @@ final class NotificationControllerTests: XCTestCase {
         _ = try await controller.schedule(timerID: UUID(), title: "x", details: "", fireDate: .now)
         let removed = await center.removed
         XCTAssertEqual(removed, ["timer-0"])
+    }
+
+    func testCapScansPastUnrelatedRequestsAndRecognizesStableIdentifierOwnership() async throws {
+        let unrelated = (0..<100).map { PendingNotification(identifier: "other-\($0)", categoryIdentifier: "other", body: "", createdAt: .distantPast) }
+        let owned = (0..<64).map { offset in
+            let id = UUID(uuidString: String(format: "00000000-0000-4000-8000-%012d", offset))!
+            return PendingNotification(identifier: NotificationController.identifier(for: id), categoryIdentifier: "wrong", body: "", createdAt: Date(timeIntervalSince1970: TimeInterval(offset)))
+        }
+        let center = NotificationCenterSpy(status: .authorized, pending: unrelated + owned)
+        _ = try await NotificationController(center: center).schedule(timerID: UUID(), title: "x", details: "", fireDate: .now)
+        let removed = await center.removed
+        XCTAssertEqual(removed, ["timer-00000000-0000-4000-8000-000000000000"])
+    }
+
+    func testGlobalPendingSafetyCapFailsBeforeScheduling() async throws {
+        let pending = (0...NotificationController.maximumPendingInspection).map { PendingNotification(identifier: "other-\($0)", categoryIdentifier: "other", body: "", createdAt: .now) }
+        let center = NotificationCenterSpy(status: .authorized, pending: pending)
+        await XCTAssertThrowsErrorAsync(try await NotificationController(center: center).schedule(timerID: UUID(), title: "x", details: "", fireDate: .now))
     }
 
     func testCancelAndActionsValidatePayload() async throws {
