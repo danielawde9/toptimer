@@ -15,6 +15,11 @@ final class NotificationControllerTests: XCTestCase {
         XCTAssertLessThanOrEqual(request?.body.count ?? .max, 120)
         let categoryCount = await center.categories.count
         XCTAssertEqual(categoryCount, 1)
+        let category = await center.categories.single
+        XCTAssertEqual(category?.identifier, NotificationController.categoryIdentifier)
+        XCTAssertEqual(category?.actions.map(\.identifier), ["STOP", "REPEAT", "SNOOZE"])
+        let operations = await center.operations
+        XCTAssertEqual(operations, ["categories", "add"])
     }
 
     func testTruncationKeepsOneHundredTwentyWholeFamilyEmojiCharacters() async throws {
@@ -95,6 +100,25 @@ final class NotificationControllerTests: XCTestCase {
         XCTAssertEqual(controller.route(actionIdentifier: "REPEAT", categoryIdentifier: NotificationController.categoryIdentifier, requestIdentifier: "timer-\(id.uuidString)", savedDuration: TimerLimits.maximumDuration + 1, snoozePreference: 2), .invalidPayload)
         XCTAssertEqual(controller.route(actionIdentifier: "SNOOZE", categoryIdentifier: "wrong", requestIdentifier: "timer-\(id.uuidString)", savedDuration: 90, snoozePreference: 2), .invalidPayload)
     }
+
+    func testRepeatPreservesValidSavedDurationAndRejectsInvalidDurations() {
+        let controller = NotificationController(center: NotificationCenterSpy(status: .authorized))
+        let id = UUID()
+        let identifier = NotificationController.identifier(for: id)
+        XCTAssertEqual(controller.route(actionIdentifier: "REPEAT", categoryIdentifier: NotificationController.categoryIdentifier, requestIdentifier: identifier, savedDuration: 123.5, snoozePreference: 60), .repeatTimer(id, duration: 123.5))
+        for invalid in [Double.infinity, -Double.infinity, Double.nan, TimerLimits.maximumDuration + 1] {
+            XCTAssertEqual(controller.route(actionIdentifier: "REPEAT", categoryIdentifier: NotificationController.categoryIdentifier, requestIdentifier: identifier, savedDuration: invalid, snoozePreference: 60), .invalidPayload)
+        }
+    }
+
+    func testSnoozeClampsBothBoundsAndKeepsInRangePreference() {
+        let controller = NotificationController(center: NotificationCenterSpy(status: .authorized))
+        let id = UUID()
+        let identifier = NotificationController.identifier(for: id)
+        XCTAssertEqual(controller.route(actionIdentifier: "SNOOZE", categoryIdentifier: NotificationController.categoryIdentifier, requestIdentifier: identifier, savedDuration: 60, snoozePreference: 2), .snooze(id, seconds: 60))
+        XCTAssertEqual(controller.route(actionIdentifier: "SNOOZE", categoryIdentifier: NotificationController.categoryIdentifier, requestIdentifier: identifier, savedDuration: 60, snoozePreference: 90), .snooze(id, seconds: 90))
+        XCTAssertEqual(controller.route(actionIdentifier: "SNOOZE", categoryIdentifier: NotificationController.categoryIdentifier, requestIdentifier: identifier, savedDuration: 60, snoozePreference: 90_000), .snooze(id, seconds: 86_400))
+    }
 }
 
 actor NotificationCenterSpy: NotificationCenterClient {
@@ -104,12 +128,13 @@ actor NotificationCenterSpy: NotificationCenterClient {
     var removed: [String] = []
     var categories: [NotificationCategory] = []
     var authorizationCalls = 0
+    var operations: [String] = []
     init(status: NotificationAuthorizationStatus, authorizationResult: Bool = true, pending: [PendingNotification] = []) { self.status = status; self.authorizationResult = authorizationResult; self.requests = pending }
     func authorizationStatus() async -> NotificationAuthorizationStatus { status }
     func requestAuthorization() async throws -> Bool { authorizationCalls += 1; return authorizationResult }
-    func setCategories(_ categories: [NotificationCategory]) async { self.categories = categories }
+    func setCategories(_ categories: [NotificationCategory]) async { self.categories = categories; operations.append("categories") }
     func pendingRequests(limit: Int) async -> [PendingNotification] { Array(requests.prefix(limit)) }
-    func add(_ request: NotificationRequest) async throws { requests.append(.init(identifier: request.identifier, categoryIdentifier: request.categoryIdentifier, body: request.body, createdAt: .now)) }
+    func add(_ request: NotificationRequest) async throws { operations.append("add"); requests.append(.init(identifier: request.identifier, categoryIdentifier: request.categoryIdentifier, body: request.body, createdAt: .now)) }
     func removePendingRequests(identifiers: [String]) async { removed.append(contentsOf: identifiers); requests.removeAll { identifiers.contains($0.identifier) } }
 }
 
