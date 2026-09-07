@@ -5,6 +5,23 @@ import TopTimerDomain
 @testable import TopTimerPersistence
 
 final class TimerRepositoryTests: XCTestCase {
+    func testAcknowledgedIsNotDeletedAndCannotBeRestored() async throws {
+        let repository = try await repository()
+        var timer = try countdown(); try timer.start(at: created)
+        _ = try await repository.insert(timer)
+        _ = try await repository.complete(timer.id, at: created.addingTimeInterval(60))
+        var acknowledged = try await repository.timer(id: timer.id)
+        try acknowledged.acknowledge(at: created.addingTimeInterval(61))
+        try await repository.update(acknowledged)
+        let deleted = try await repository.deleted(limit: 100)
+        XCTAssertFalse(deleted.contains { $0.id == timer.id })
+        do {
+            try await repository.restore(timer.id, at: created.addingTimeInterval(62))
+            XCTFail("Acknowledgement is terminal, not a user deletion")
+        } catch { XCTAssertEqual(error as? TimerRepositoryError, .invalidRestore) }
+        let saved = try await repository.timer(id: timer.id)
+        XCTAssertEqual(saved, acknowledged)
+    }
     func testTerminalUpdatesReplayAcknowledgementRestartAndMetadataExactly() async throws {
         let repository = try await repository()
         var timer = try countdown(); try timer.start(at: created)

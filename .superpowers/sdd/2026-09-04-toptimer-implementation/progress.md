@@ -45,3 +45,12 @@ exact terminal repository transitions, immutable editor kind, and native
 pass-through commands repaired. See task-10-fix-round-5-report.md. Final 219 tests
 and strict warning-as-error debug/release builds pass. Pending independent
 review; packaged audible playback and full accessibility smoke tests unclaimed.
+
+## Task 10 final quality fix
+
+All asynchronous app-state UI work now uses one bounded synchronous-admission
+owner. Quit rejects new/queued work, cancels and drains in-flight work, then closes
+Core Data. Acknowledged timers are excluded from Recently Deleted and cannot be
+restored. Real Core Data regressions and deterministic shutdown tests pass.
+224 tests, strict warning-as-error debug/release builds, and diff check pass.
+See task-10-quality-final-fix-report.md. Independent review remains pending.

@@ -402,3 +402,26 @@ and restart persistence.
 explicit truncation/selection policy; a larger cache requires bounded eviction
 or pagination. Critical-alert volume would require a separately justified Apple
 entitlement and must not be used to emulate ordinary timer-volume settings.
+
+## 2026-09-07 — Task 10 shutdown ownership and acknowledgement recovery
+
+**Decision:** One main-actor operation owner admits at most 128 outstanding jobs
+across startup/retry, UI commands, editor work, hotkeys, and timer refresh. Admission
+is synchronous and closes synchronously on Quit. Queued jobs cannot start after
+closure; running jobs are cancelled and fully awaited before Core Data closes.
+Busy/closing user submissions receive an inline error. Startup attempts share one
+owned store, and termination/retry-close has one separately retained task.
+
+**Why:** Cancellation alone does not stop an operation suspended in persistence or
+a platform adapter. Bounded ownership plus a drain is the storage lifetime boundary.
+No timeout is allowed to close the store beneath a still-running operation.
+
+**Decision:** Acknowledgement is terminal archival, not user deletion, even though
+the existing domain uses deletedAt for its archive timestamp. Recently Deleted
+excludes acknowledged states in its bounded database predicate, and Restore rejects
+acknowledged rows without mutation.
+
+**If the client answers differently:** A larger operation cap requires resource
+measurement; timed shutdown must leave storage open when drainage times out.
+Restoring acknowledged timers would need an explicit domain restart/recovery rule,
+not removal of the archive timestamp alone.

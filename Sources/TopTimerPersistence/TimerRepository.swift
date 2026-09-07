@@ -4,6 +4,7 @@ import TopTimerDomain
 
 public enum TimerRepositoryError: Error, Equatable, Sendable {
     case invalidCreation
+    case invalidRestore
     case timerNotFound
     case unsupportedPayloadVersion(Int)
     case malformedPayload
@@ -236,7 +237,7 @@ public actor TimerCoreDataRepository: TimerRepository {
         let limit = min(100, Self.boundedLimit(limit))
         return try await store.perform { context in
             let request = NSFetchRequest<TimerRecord>(entityName: "TimerRecord")
-            request.predicate = NSPredicate(format: "deletedAt != nil")
+            request.predicate = NSPredicate(format: "deletedAt != nil AND state != %@", TimerState.acknowledged.rawValue)
             request.sortDescriptors = [NSSortDescriptor(key: "deletedAt", ascending: false), NSSortDescriptor(key: "id", ascending: true)]
             request.fetchLimit = limit
             return try context.fetch(request).map { try TimerPayloadCodec.decodeTimer($0.payload) }
@@ -373,7 +374,7 @@ public actor TimerCoreDataRepository: TimerRepository {
             }
         }
     }
-    public func restore(_ id: UUID, at date: Date) async throws { try await store.perform { context in do { let record = try Self.timerRecord(id: id, in: context); var timer = try TimerPayloadCodec.decodeTimer(record.payload); try timer.restore(at: date); try Self.apply(timer, to: record); try context.save() } catch { context.rollback(); throw error } } }
+    public func restore(_ id: UUID, at date: Date) async throws { try await store.perform { context in do { let record = try Self.timerRecord(id: id, in: context); var timer = try TimerPayloadCodec.decodeTimer(record.payload); guard timer.state != .acknowledged else { throw TimerRepositoryError.invalidRestore }; try timer.restore(at: date); try Self.apply(timer, to: record); try context.save() } catch { context.rollback(); throw error } } }
 
     public func historyPage(
         from: Date?,

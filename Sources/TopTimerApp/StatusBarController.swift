@@ -82,7 +82,7 @@ private struct PopoverRoot: View {
     }.onChange(of: showingList) { value in onListChange(value) }.sheet(
       isPresented: Binding(
         get: { state.selectedEditorTimer != nil },
-        set: { if !$0 { Task { await state.selectEditor(nil) } } })
+        set: { if !$0 { state.perform { await state.selectEditor(nil) } } })
     ) {
       if let timer = state.selectedEditorTimer {
         EditorSheet(timer: timer, state: state, sounds: sounds)
@@ -107,7 +107,7 @@ private struct EditorSheet: View {
         Text(error).font(.caption).foregroundStyle(.red)
         Button("Retry loading sounds") { sounds.refresh() }
       }
-      TimerEditorView(draft: $draft, catalog: sounds.catalog) { configuration in
+      TimerEditorView(draft: $draft, catalog: sounds.catalog, operations: state.operations) { configuration in
         await state.reconfigure(timer.id, configuration: configuration)
       }
     }.onAppear { sounds.refresh() }

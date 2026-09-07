@@ -30,7 +30,7 @@ public struct TimerListView: View {
               HStack {
                 Text(timer.title.isEmpty ? "Untitled timer" : timer.title)
                 Spacer()
-                Button("Restore") { Task { _ = await state.restore(timer.id) } }
+                Button("Restore") { state.perform { _ = await state.restore(timer.id) } }
                   .buttonStyle(.borderless).help("Restore timer").accessibilityLabel(
                     "Restore \(timer.title)"
                   ).frame(minHeight: 28)
@@ -93,16 +93,16 @@ private struct TimerRow: View {
     }
   }
   @ViewBuilder private var actions: some View {
-    Button("Edit") { Task { await state.selectEditor(timer.id) } }
-    Button("Duplicate") { Task { _ = await state.duplicate(timer.id) } }
-    Button("Restart") { Task { _ = await state.restart(timer.id) } }
-    if timer.state == .running { Button("Pause") { Task { _ = await state.pause(timer.id) } } }
-    if timer.state == .paused { Button("Resume") { Task { _ = await state.resume(timer.id) } } }
-    if timer.state == .idle { Button("Start") { Task { _ = await state.start(timer.id) } } }
+    Button("Edit") { state.perform { await state.selectEditor(timer.id) } }
+    Button("Duplicate") { state.perform { _ = await state.duplicate(timer.id) } }
+    Button("Restart") { state.perform { _ = await state.restart(timer.id) } }
+    if timer.state == .running { Button("Pause") { state.perform { _ = await state.pause(timer.id) } } }
+    if timer.state == .paused { Button("Resume") { state.perform { _ = await state.resume(timer.id) } } }
+    if timer.state == .idle { Button("Start") { state.perform { _ = await state.start(timer.id) } } }
     if timer.state == .completed {
-      Button("Acknowledge") { Task { _ = await state.acknowledge(timer.id) } }
+      Button("Acknowledge") { state.perform { _ = await state.acknowledge(timer.id) } }
     }
-    Button("Delete", role: .destructive) { Task { _ = await state.softDelete(timer.id) } }
+    Button("Delete", role: .destructive) { state.perform { _ = await state.softDelete(timer.id) } }
   }
   private var summary: String {
     let recurrence: String

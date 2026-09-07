@@ -33,6 +33,10 @@ extension NotificationController: TimerNotificationScheduling {
 /// every mutation is stored before it is reflected to the UI.
 @MainActor
 public final class AppState: ObservableObject {
+    public let operations: AppOperationOwner
+    public func perform(_ operation: @escaping @MainActor () async -> Void) {
+        if !operations.submit(operation) { inlineError = "Timer work is unavailable while closing or busy. Try again when ready." }
+    }
     @Published public private(set) var activeTimers: [TimerItem] = []
     @Published public private(set) var deletedTimers: [TimerItem] = []
     @Published public var quickEntryText = ""
@@ -57,10 +61,12 @@ public final class AppState: ObservableObject {
         notifications: any TimerNotificationScheduling,
         presets: (any PresetRepository)? = nil,
         alertSounds: AlertSoundController? = nil,
+        operations: AppOperationOwner = AppOperationOwner(),
         now: @escaping () -> Date = { .now },
         parser: @escaping (Date) -> TimerParser = { TimerParser(now: $0) }
     ) {
         self.repository = repository
+        self.operations = operations
         self.notifications = notifications
         self.alertSounds = alertSounds
         self.presets = presets

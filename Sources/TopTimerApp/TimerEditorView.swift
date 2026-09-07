@@ -114,14 +114,17 @@ public struct TimerEditorView: View {
   @Binding var draft: EditorDraft
   let save: (TimerConfiguration) async -> Bool
   let catalog: SoundCatalog
+  let operations: AppOperationOwner
   @State private var error: String?
   @Environment(\.dismiss) private var dismiss
   public init(
     draft: Binding<EditorDraft>, catalog: SoundCatalog = .builtIn,
+    operations: AppOperationOwner = AppOperationOwner(),
     save: @escaping (TimerConfiguration) async -> Bool
   ) {
     _draft = draft
     self.catalog = catalog
+    self.operations = operations
     self.save = save
   }
   public var body: some View {
@@ -210,7 +213,7 @@ public struct TimerEditorView: View {
     }
   }
   private func submit() {
-    Task {
+    guard operations.submit({
       do {
         let configuration = try draft.configuration(catalog: catalog)
         guard await save(configuration) else {
@@ -221,7 +224,7 @@ public struct TimerEditorView: View {
       } catch let EditorDraftError.invalid(message) { error = message } catch {
         self.error = "Invalid timer configuration."
       }
-    }
+    }) else { error = "Cannot save while closing or busy."; return }
   }
 }
 

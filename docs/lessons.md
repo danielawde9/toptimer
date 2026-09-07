@@ -33,3 +33,16 @@ Task10Round5BoundaryTests, NotificationSoundBoundaryTests, and the terminal
 TimerRepositoryTests are executable regression detectors spanning the real
 AppState/controller, real Core Data, native command coordinator, audio-file
 conversion and actual UNMutableNotificationContent boundaries.
+
+## 2026-09-07 — Own asynchronous work before launching it
+
+An untracked UI Task can outlive the view and enter Core Data after normal Quit
+closes its store. Register synchronously with the shared bounded operation owner;
+close admission before cancelling and draining, and only then close storage.
+Cancellation is a request, not evidence of completion. OperationOwnerTests includes
+a deterministic cancellation-handshake detector, queued-work rejection, bounded
+admission/cleanup, and real AppState/Core Data persistence-before-close coverage.
+
+Archive timestamps do not establish deletion provenance. The acknowledged-row
+repository test proves both recovery-query exclusion and restore rejection with
+unchanged persisted content; do not derive recoverability from deletedAt alone.

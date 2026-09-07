@@ -51,7 +51,7 @@ public struct QuickEntryView: View {
       }.buttonStyle(.borderless).padding(8)
     }.frame(width: 260).onAppear { focused = true }.onChange(of: state.quickEntryText) { text in
       selectedSuggestion = 0
-      Task { await state.refreshSuggestions(query: text) }
+      state.perform { await state.refreshSuggestions(query: text) }
     }.sheet(isPresented: $showingSettings) { SettingsPanel(preferences: $state.preferences) }
   }
   private func handle(_ effect: QuickEntryEffect) {
@@ -71,10 +71,10 @@ public struct QuickEntryView: View {
     }
   }
   /// Selecting a suggestion and pressing Return runs it immediately, exactly like clicking Run.
-  private func run() { Task { await state.create(command: state.quickEntryText) } }
+  private func run() { let command = state.quickEntryText; state.perform { await state.create(command: command) } }
   private func togglePriority() {
     guard let timer = state.priorityTimer else { return }
-    Task {
+    state.perform {
       if timer.state == .running {
         _ = await state.pause(timer.id)
       } else {
