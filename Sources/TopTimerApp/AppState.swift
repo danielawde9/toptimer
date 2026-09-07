@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import TopTimerDomain
 import TopTimerPersistence
@@ -20,16 +21,16 @@ extension NotificationController: TimerNotificationScheduling {
 /// Main-actor owned presentation state. Persistence remains the source of truth:
 /// every mutation is stored before it is reflected to the UI.
 @MainActor
-public final class AppState {
-    public private(set) var activeTimers: [TimerItem] = []
-    public var quickEntryText = ""
-    public private(set) var inlineError: String?
-    public private(set) var notificationStatus: NotificationScheduleStatus?
-    public private(set) var priorityTimer: TimerItem?
-    public private(set) var selectedEditorTimer: TimerItem?
-    public private(set) var historyPage = HistoryPage(entries: [], nextCursor: nil)
-    public private(set) var suggestions: [String] = []
-    public var preferences = AppPreferences()
+public final class AppState: ObservableObject {
+    @Published public private(set) var activeTimers: [TimerItem] = []
+    @Published public var quickEntryText = ""
+    @Published public private(set) var inlineError: String?
+    @Published public private(set) var notificationStatus: NotificationScheduleStatus?
+    @Published public private(set) var priorityTimer: TimerItem?
+    @Published public private(set) var selectedEditorTimer: TimerItem?
+    @Published public private(set) var historyPage = HistoryPage(entries: [], nextCursor: nil)
+    @Published public private(set) var suggestions: [String] = []
+    @Published public var preferences = AppPreferences()
     private var refreshing = false
 
     private let repository: any TimerRepository
@@ -94,16 +95,16 @@ public final class AppState {
     }
 
     /// Re-reads durable state; it never decrements a UI-side counter.
-    public func refresh(now _: Date) async {
+    public func refresh(now date: Date) async {
+        guard date.timeIntervalSinceReferenceDate.isFinite else { return }
         guard !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
-        let date = now()
         do {
             let current = Array(try await repository.active(limit: 100).prefix(100))
             for timer in current where timer.kind == .countdown && timer.state == .running && (timer.deadline ?? .distantFuture) <= date {
                 let outcome = try await repository.complete(timer.id, at: date)
-                if let successor = outcome.successor { _ = try? await notifications.schedule(successor) }
+                if let successor = outcome.successor { await scheduleAfterPersistence(successor) }
             }
         } catch { inlineError = "Could not refresh timers." }
         await publishActive()
@@ -140,13 +141,13 @@ public final class AppState {
         selectedEditorTimer = try? await repository.timer(id: id)
     }
 
-    public func pause(_ id: UUID) async { await update(id) { try $0.pause(at: self.now()) }; try? await notifications.cancel(timerID: id) }
-    public func resume(_ id: UUID) async { await update(id) { try $0.resume(at: self.now()) }; await reschedule(id) }
-    public func restart(_ id: UUID) async { await update(id) { try $0.restart(at: self.now()) }; await reschedule(id) }
-    public func acknowledge(_ id: UUID) async { await update(id) { try $0.acknowledge(at: self.now()) }; try? await notifications.cancel(timerID: id) }
-    public func softDelete(_ id: UUID) async { do { try await repository.softDelete(id, at: now()); try? await notifications.cancel(timerID: id); await publishActive() } catch { inlineError = "Could not delete timer." } }
-    public func cancel(_ id: UUID) async { do { _ = try await repository.cancel(id: id, at: now()); try? await notifications.cancel(timerID: id); await publishActive() } catch { inlineError = "Could not cancel timer." } }
-    public func complete(_ id: UUID) async { do { let outcome = try await repository.complete(id, at: now()); if let successor = outcome.successor { _ = try? await notifications.schedule(successor) }; await publishActive() } catch { inlineError = "Could not complete timer." } }
+    @discardableResult public func pause(_ id: UUID) async -> Bool { await transition(id, failure: "Could not pause timer.", mutation: { try $0.pause(at: self.now()) }, effect: { _ in try await self.notifications.cancel(timerID: id) }) }
+    @discardableResult public func resume(_ id: UUID) async -> Bool { await transition(id, failure: "Could not resume timer.", mutation: { try $0.resume(at: self.now()) }, effect: { timer in await self.scheduleAfterPersistence(timer) }) }
+    @discardableResult public func restart(_ id: UUID) async -> Bool { await transition(id, failure: "Could not restart timer.", mutation: { try $0.restart(at: self.now()) }, effect: { timer in await self.scheduleAfterPersistence(timer) }) }
+    @discardableResult public func acknowledge(_ id: UUID) async -> Bool { await transition(id, failure: "Could not acknowledge timer.", mutation: { try $0.acknowledge(at: self.now()) }, effect: { _ in try await self.notifications.cancel(timerID: id) }) }
+    @discardableResult public func softDelete(_ id: UUID) async -> Bool { do { try await repository.softDelete(id, at: now()); await cancelAfterPersistence(id); await publishActive(); return true } catch { inlineError = "Could not delete timer."; return false } }
+    @discardableResult public func cancel(_ id: UUID) async -> Bool { do { _ = try await repository.cancel(id: id, at: now()); await cancelAfterPersistence(id); await publishActive(); return true } catch { inlineError = "Could not cancel timer."; return false } }
+    @discardableResult public func complete(_ id: UUID) async -> Bool { do { let outcome = try await repository.complete(id, at: now()); if let successor = outcome.successor { await scheduleAfterPersistence(successor) }; await publishActive(); return true } catch { inlineError = "Could not complete timer."; return false } }
 
     /// NotificationController performs category and payload validation before
     /// this boundary is called; invalid values intentionally have no effects.
@@ -172,11 +173,27 @@ public final class AppState {
         } catch { inlineError = "Could not create timer from notification action." }
     }
 
-    private func update(_ id: UUID, mutation: (inout TimerItem) throws -> Void) async {
-        do { var timer = try await repository.timer(id: id); try mutation(&timer); try await repository.update(timer); await publishActive() }
-        catch { inlineError = "Could not update timer." }
+    private func transition(_ id: UUID, failure: String, mutation: (inout TimerItem) throws -> Void, effect: (TimerItem) async throws -> Void) async -> Bool {
+        do {
+            var timer = try await repository.timer(id: id)
+            try mutation(&timer)
+            try await repository.update(timer)
+            do { try await effect(timer) } catch { inlineError = "Timer saved, but notification scheduling failed." }
+            await publishActive()
+            return true
+        } catch { inlineError = failure; return false }
     }
-    private func reschedule(_ id: UUID) async { if let timer = try? await repository.timer(id: id), timer.kind == .countdown { notificationStatus = try? await notifications.schedule(timer) } }
+
+    private func cancelAfterPersistence(_ id: UUID) async {
+        do { try await notifications.cancel(timerID: id) }
+        catch { inlineError = "Timer saved, but notification scheduling failed." }
+    }
+
+    private func scheduleAfterPersistence(_ timer: TimerItem) async {
+        guard timer.kind == .countdown else { return }
+        do { notificationStatus = try await notifications.schedule(timer) }
+        catch { notificationStatus = nil; inlineError = "Timer saved, but notification scheduling failed." }
+    }
 }
 
 public struct AppPreferences: Equatable, Sendable {

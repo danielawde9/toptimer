@@ -40,6 +40,17 @@ final class AppStateTests: XCTestCase {
         await state.refreshSuggestions(query: "work")
         XCTAssertEqual(state.suggestions.count, 1)
     }
+
+    func testRefreshUsesItsSuppliedTickRatherThanTheInjectedCreationClock() async throws {
+        let repository = RecordingRepository()
+        let creation = Date(timeIntervalSince1970: 1_000)
+        let state = AppState(repository: repository, notifications: RecordingNotifications(), now: { creation })
+
+        await state.create(command: "1m Focus")
+        await state.refresh(now: creation.addingTimeInterval(60))
+
+        XCTAssertTrue(state.activeTimers.isEmpty)
+    }
 }
 
 actor RecordingRepository: TimerRepository {
@@ -47,9 +58,16 @@ actor RecordingRepository: TimerRepository {
     private var timers: [UUID: TimerItem] = [:]
     func insert(_ timer: TimerItem) async throws -> TimerItem { operations.append("insert"); timers[timer.id] = timer; return timer }
     func update(_ timer: TimerItem) async throws { timers[timer.id] = timer }
-    func active(limit: Int) async throws -> [TimerItem] { Array(timers.values.prefix(limit)) }
+    func active(limit: Int) async throws -> [TimerItem] {
+        return Array(timers.values.filter { $0.state == .idle || $0.state == .running || $0.state == .paused }.prefix(limit))
+    }
     func activePage(limit: Int, after: TimerPageCursor?) async throws -> TimerPage { .init(timers: try await active(limit: limit), nextCursor: nil) }
-    func complete(_ id: UUID, at: Date) async throws -> CompletionOutcome { fatalError() }
+    func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome {
+        guard let timer = timers[id] else { throw TimerRepositoryError.timerNotFound }
+        let outcome = try RecurrenceService().complete(timer, at: date)
+        timers[id] = outcome.completed
+        return outcome
+    }
     func cancel(id: UUID, at: Date) async throws -> TimerItem { fatalError() }
     func softDelete(_ id: UUID, at: Date) async throws {}
     func historyPage(from: Date?, through: Date?, query: String, limit: Int, after: HistoryPageCursor?) async throws -> HistoryPage { .init(entries: [], nextCursor: nil) }
