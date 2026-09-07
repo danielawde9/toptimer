@@ -23,6 +23,7 @@ extension NotificationController: TimerNotificationScheduling {
 @MainActor
 public final class AppState: ObservableObject {
     @Published public private(set) var activeTimers: [TimerItem] = []
+    @Published public private(set) var deletedTimers: [TimerItem] = []
     @Published public var quickEntryText = ""
     @Published public private(set) var inlineError: String?
     @Published public private(set) var notificationStatus: NotificationScheduleStatus?
@@ -129,6 +130,7 @@ public final class AppState: ObservableObject {
         do {
             activeTimers = Array(try await repository.active(limit: 100).prefix(100))
             priorityTimer = try await repository.priority(at: date ?? now())
+            deletedTimers = Array(try await repository.deleted(limit: 100).prefix(100))
         } catch {
             inlineError = "Could not refresh timers."
         }
@@ -162,7 +164,15 @@ public final class AppState: ObservableObject {
     @discardableResult public func restart(_ id: UUID) async -> Bool { await transition(id, failure: "Could not restart timer.", mutation: { try $0.restart(at: self.now()) }, effect: { timer in await self.scheduleAfterPersistence(timer) }) }
     @discardableResult public func acknowledge(_ id: UUID) async -> Bool { await transition(id, failure: "Could not acknowledge timer.", mutation: { try $0.acknowledge(at: self.now()) }, effect: { _ in try await self.notifications.cancel(timerID: id) }) }
     @discardableResult public func softDelete(_ id: UUID) async -> Bool { do { try await repository.softDelete(id, at: now()); await cancelAfterPersistence(id); await publishActive(); return true } catch { inlineError = "Could not delete timer."; return false } }
-    @discardableResult public func restore(_ id: UUID) async -> Bool { do { try await repository.restore(id, at: now()); await publishActive(); return true } catch { inlineError = "Could not restore timer."; return false } }
+    @discardableResult public func restore(_ id: UUID) async -> Bool {
+        do {
+            try await repository.restore(id, at: now())
+            let timer = try await repository.timer(id: id)
+            if timer.state == .running { await scheduleAfterPersistence(timer) }
+            await publishActive()
+            return true
+        } catch { inlineError = "Could not restore timer."; return false }
+    }
     @discardableResult public func cancel(_ id: UUID) async -> Bool { do { _ = try await repository.cancel(id: id, at: now()); await cancelAfterPersistence(id); await publishActive(); return true } catch { inlineError = "Could not cancel timer."; return false } }
     @discardableResult public func complete(_ id: UUID) async -> Bool { do { let outcome = try await repository.complete(id, at: now()); if let successor = outcome.successor { await scheduleAfterPersistence(successor) }; await publishActive(); return true } catch { inlineError = "Could not complete timer."; return false } }
     @discardableResult public func edit(_ id: UUID, title: String, details: String, tags: [String]) async -> Bool {

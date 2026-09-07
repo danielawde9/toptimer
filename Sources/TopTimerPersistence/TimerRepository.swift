@@ -20,6 +20,7 @@ public protocol TimerRepository: Sendable {
     func insert(_ timer: TimerItem) async throws -> TimerItem
     func update(_ timer: TimerItem) async throws
     func active(limit: Int) async throws -> [TimerItem]
+    func deleted(limit: Int) async throws -> [TimerItem]
     func due(at date: Date, limit: Int) async throws -> [TimerItem]
     func priority(at date: Date) async throws -> TimerItem?
     func activePage(limit: Int, after cursor: TimerPageCursor?) async throws -> TimerPage
@@ -226,6 +227,17 @@ public actor TimerCoreDataRepository: TimerRepository {
                 NSSortDescriptor(key: "createdAt", ascending: true),
                 NSSortDescriptor(key: "id", ascending: true)
             ]
+            request.fetchLimit = limit
+            return try context.fetch(request).map { try TimerPayloadCodec.decodeTimer($0.payload) }
+        }
+    }
+
+    public func deleted(limit: Int) async throws -> [TimerItem] {
+        let limit = min(100, Self.boundedLimit(limit))
+        return try await store.perform { context in
+            let request = NSFetchRequest<TimerRecord>(entityName: "TimerRecord")
+            request.predicate = NSPredicate(format: "deletedAt != nil")
+            request.sortDescriptors = [NSSortDescriptor(key: "deletedAt", ascending: false), NSSortDescriptor(key: "id", ascending: true)]
             request.fetchLimit = limit
             return try context.fetch(request).map { try TimerPayloadCodec.decodeTimer($0.payload) }
         }

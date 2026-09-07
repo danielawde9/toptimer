@@ -1156,6 +1156,7 @@ private func rawTimerPayload(id: UUID, in context: NSManagedObjectContext) throw
 }
 
 private actor ProtocolRepositoryFake: TimerRepository {
+    func deleted(limit: Int) async throws -> [TimerItem] { [] }
     func insert(_ timer: TimerItem) async throws -> TimerItem { timer }
     func restore(_ id: UUID, at date: Date) async throws {}
 

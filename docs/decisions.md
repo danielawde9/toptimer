@@ -348,3 +348,26 @@ convenience feature into unbounded memory or nondeterministic UI state.
 **If the client answers differently:** Cross-device suggestions or fuzzy command
 matching need an explicit synchronization/privacy design and a new payload
 version.
+
+## 2026-09-07 — Task 10 editor and recovery defaults
+
+**Decision:** Duration and completion interval use explicitly labelled seconds;
+calendar schedules use local 24-hour hour/minute fields. Recently Deleted is a
+separate collection showing the newest 100 soft-deleted timers. Restore preserves
+the timer's durable state/deadline, increments its revision, and reschedules a
+running countdown. A row reserves 60 points for one native Actions menu.
+
+**Why:** These choices expose the complete domain configuration in a small native
+form, keep each collection within the approved row bound, and preserve keyboard
+focus without shifting row content. Numeric parse failures invalidate the draft
+while retaining the entered text, so Save cannot use a stale number.
+
+**Decision:** The sound picker combines the 14 standard macOS alert names with
+imported file basenames from TopTimer/Sounds. It returns at most 100 identities
+and inspects at most 200 direct filesystem children. Missing selected sounds stay
+visible as unavailable; load failure retains the last catalog and offers Retry.
+
+**If the client answers differently:** Unit-based duration entry requires a
+separate explicit units control; larger deleted/sound collections require
+pagination/search. Restoring as a fresh run would require a new occurrence rather
+than preserving the existing deadline.
