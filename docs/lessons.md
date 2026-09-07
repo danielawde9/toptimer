@@ -66,3 +66,12 @@ Executable detectors: SettingsStoreTests, Task11BehaviorTests, and
 Task11RenderedTests cover these boundaries, including real SQLite reopen,
 native history/report tables, four-window close, deterministic concurrent
 requests, CSV failure isolation, DST days, and report capacity rejection.
+
+## 2026-09-07 — Recovery must synchronize presentation and state
+
+An empty-state action must update its visible controls as well as its repository
+query. Task11Round3Tests follows Show all through control state, applied query,
+edit/delete/recover, and export. Startup recovery keeps strict decoding but offers
+safe defaults and a concrete save retry instead of repeating an unchanged error.
+The rendered settings detector checks a 700 by 520 host with simultaneous errors,
+its bounded fitting size, document overflow, and successful scrolling to the end.

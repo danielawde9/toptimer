@@ -101,13 +101,13 @@ import TopTimerSystem
     item.button?.setAccessibilityLabel(title.accessibilityLabel)
   }
 }
-private struct SettingsWindowRoot: View {
+struct SettingsWindowRoot: View {
   @ObservedObject var state: AppState
   let updateHotKey: (HotKeySlot, Shortcut) -> String?
   let updateLogin: (Bool) -> String?
   let importSound: (URL) async throws -> String
   var body: some View {
-    VStack {
+    GeometryReader { geometry in
       SettingsView(
         settings: $state.preferences,
         notificationDenied: state.notificationStatus == .authorizationDenied
@@ -115,7 +115,18 @@ private struct SettingsWindowRoot: View {
         updateHotKey: { state.changeHotKey($1, slot: $0, apply: updateHotKey) },
         updateLogin: { state.changeLogin($0, apply: updateLogin) },
         importSound: importSound, operations: state.operations,
-        updateSound: { await state.changeDefaultSound($0) })
+        updateSound: { await state.changeDefaultSound($0) },
+        additionalContent: AnyView(operationMessages)
+      )
+      .frame(width: geometry.size.width, height: geometry.size.height)
+    }.frame(minWidth: 460, minHeight: 360)
+  }
+  private var operationMessages: some View {
+    Section("Status and recovery") {
+      if let warning = state.settingsRecoveryWarning {
+        Text(warning).fixedSize(horizontal: false, vertical: true)
+        Button("Save recovered settings and acknowledge") { state.saveRecoveredSettings() }
+      }
       if let error = state.settingsError { Text(error).foregroundStyle(.red) }
       if let error = state.soundError { Text(error).foregroundStyle(.red) }
       if let error = state.loginError { Text(error).foregroundStyle(.red) }

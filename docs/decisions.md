@@ -487,3 +487,32 @@ make relaunch behavior match the visible controls.
 repository aggregation; changing twelve-hour ambiguity needs a parser ruling and
 tests. Longer deleted-history browsing requires a tombstone cursor. A different
 retention policy must explicitly decide whether deleted entries also expire.
+
+## 2026-09-07 — Task 11 round 3: explicit filters and recoverable defaults
+
+**Decision:** History owns one visible control model with an explicit All time
+choice. Show all history sets that choice and clears search before applying it;
+date pickers are hidden while All time is selected. History mutations and CSV
+reuse the applied query, and reopening the view uses the same control model.
+
+**Decision:** Strict settings decoding still rejects corrupt, unknown-version,
+oversized, and invalid envelopes. Startup catches that failure and resets to
+normalized defaults, with a nonfatal recovery warning in Quick Entry and Settings.
+Successful reset replaces the invalid stored envelope. If reset cannot be saved,
+the original bytes stay intact and the app runs on defaults with a Save recovered
+settings and acknowledge action. Do not route invalid preferences into the fatal
+database-startup Retry loop.
+
+**Decision:** Settings controls, operation errors, and recovery actions share the
+same scrolling Form, constrained by the available window geometry. The default
+700 by 520 window must remain usable with simultaneous errors; the minimum
+content viewport is 460 by 360.
+
+**Why:** Visible filter state must explain the queried/exported result. Corrupt
+preferences should not make a timer app unusable. Error recovery must remain
+reachable even when messages exceed the current window height.
+
+**If the client answers differently:** Preserving invalid envelopes for forensic
+recovery would require a bounded quarantine policy instead of reset. Automatic
+filter application would replace the explicit Apply workflow and need input
+debouncing and its own query-admission tests.

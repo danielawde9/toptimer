@@ -85,7 +85,8 @@ import TopTimerSystem
     starting = true
     defer { starting = false }
     do {
-      let preferences = try settingsStore.load()
+      let recovered = settingsStore.loadForStartup()
+      let preferences = recovered.settings
       let folder = try applicationSupportFolder()
       let newStore: CoreDataStore
       if let existing = store {
@@ -102,6 +103,7 @@ import TopTimerSystem
         notifications: NotificationController(), presets: PresetCoreDataRepository(store: newStore),
         alertSounds: soundController, operations: operations,
         settingsStore: settingsStore, initialPreferences: preferences,
+        settingsRecoveryWarning: recovered.warning,
         sleepController: sleepController)
       await state.load()
       guard operations.accepting else { return }
@@ -154,7 +156,9 @@ import TopTimerSystem
     operations.submit { await self.start() }
   }
   private func replaceHotKey(_ shortcut: Shortcut, for slot: HotKeySlot) -> String? {
-    guard let hotKeys else { return "Shortcuts are unavailable while starting or closing. Try again when ready." }
+    guard let hotKeys else {
+      return "Shortcuts are unavailable while starting or closing. Try again when ready."
+    }
     do {
       try hotKeys.register(shortcut, for: slot)
       return nil

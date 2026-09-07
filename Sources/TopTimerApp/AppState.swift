@@ -56,6 +56,11 @@ public final class AppState: ObservableObject {
   @Published public private(set) var recentlyDeletedHistory: [HistoryEntry] = []
   @Published public private(set) var historyLoading = false
   @Published public private(set) var historyError: String?
+  @Published public var historyControls = HistoryFilterControls()
+  public var currentHistoryFilter: HistoryQuery {
+    HistoryQuery(
+      from: historyFilter.from, through: historyFilter.through, query: historyFilter.query)
+  }
   @Published public private(set) var exportError: String?
   @Published public private(set) var reportEntries: [HistoryEntry] = []
   @Published public private(set) var reportSummary = ReportSummary.empty
@@ -68,6 +73,7 @@ public final class AppState: ObservableObject {
   private var reportsRequested = false
   @Published public private(set) var suggestions: [String] = []
   @Published public private(set) var settingsError: String?
+  @Published public private(set) var settingsRecoveryWarning: String?
   @Published public private(set) var sleepError: String?
   @Published public private(set) var retentionError: String?
   @Published public private(set) var loginError: String?
@@ -111,6 +117,7 @@ public final class AppState: ObservableObject {
     operations: AppOperationOwner = AppOperationOwner(),
     settingsStore: TopTimerSettingsStore? = nil,
     initialPreferences: TopTimerSettings = .defaults,
+    settingsRecoveryWarning: String? = nil,
     sleepController: SleepAssertionController? = nil,
     now: @escaping () -> Date = { .now },
     parser: ((Date) -> TimerParser)? = nil
@@ -124,7 +131,32 @@ public final class AppState: ObservableObject {
     self.parser = parser
     self.settingsStore = settingsStore
     self.preferences = initialPreferences
+    self.settingsRecoveryWarning = settingsRecoveryWarning
     self.sleepController = sleepController
+  }
+
+  public func saveRecoveredSettings() {
+    do {
+      try settingsStore?.save(preferences)
+      settingsRecoveryWarning = nil
+      settingsError = nil
+    } catch {
+      settingsError =
+        "Could not save recovered settings. Retry saving when local storage is writable."
+    }
+  }
+
+  public func showAllHistory() async {
+    historyControls.allTime = true
+    historyControls.query = ""
+    await applyHistoryControls()
+  }
+
+  public func applyHistoryControls() async {
+    do {
+      let filter = try historyControls.validatedQuery()
+      await loadHistory(from: filter.from, through: filter.through, query: filter.query)
+    } catch { historyError = "Choose a Through date on or after From, then Apply." }
   }
 
   public func updateSleepAssertion() {

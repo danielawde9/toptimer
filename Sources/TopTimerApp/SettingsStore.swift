@@ -109,4 +109,27 @@ public final class TopTimerSettingsStore {
   public func save(_ settings: TopTimerSettings) throws {
     try storage.write(TopTimerSettingsCodec.encode(settings))
   }
+  public func loadForStartup() -> SettingsStartupRecovery {
+    do { return SettingsStartupRecovery(settings: try load(), warning: nil) } catch {
+      do {
+        try save(.defaults)
+        return SettingsStartupRecovery(
+          settings: .defaults,
+          warning:
+            "Saved settings could not be read and were reset to safe defaults. Review Settings, then acknowledge recovery."
+        )
+      } catch {
+        return SettingsStartupRecovery(
+          settings: .defaults,
+          warning:
+            "Saved settings could not be read. Safe defaults are active, but could not be saved. Retry saving recovered settings."
+        )
+      }
+    }
+  }
+}
+
+public struct SettingsStartupRecovery: Equatable, Sendable {
+  public let settings: TopTimerSettings
+  public let warning: String?
 }

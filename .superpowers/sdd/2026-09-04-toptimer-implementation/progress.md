@@ -71,3 +71,14 @@ pass; diff check passes. Native table/controller tests and rendered screenshots
 were inspected. Packaged VoiceOver, actual OS permission changes, and audible
 smoke testing remain installation acceptance work, not claimed here. Full report:
 task-11-fix-round-2-report.md. Independent review pending.
+
+## Task 11 fix round 3
+
+Fixed the remaining filter-control mismatch with an explicit All time control
+model shared by the view and query application. Invalid settings recover to
+normalized defaults with a nonfatal warning and a save retry. Settings messages
+now scroll with controls inside the available window geometry. Five new tests
+cover control/query/export agreement, corrupt/unknown/oversized startup recovery,
+real UserDefaults persistence, failed-reset retry, and 700 by 520 rendered error
+scrolling. Full suite: 256 tests; strict debug/release and diff check passed.
+See task-11-fix-round-3-report.md. Independent review pending.

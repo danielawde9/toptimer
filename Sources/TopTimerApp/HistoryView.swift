@@ -6,21 +6,21 @@ extension HistoryEntry: Identifiable {}
 
 public struct HistoryView: View {
   @ObservedObject private var state: AppState
-  @State private var from = Calendar.current.date(byAdding: .month, value: -1, to: .now) ?? .now
-  @State private var through = Date.now
-  @State private var query = ""
   @State private var selected: HistoryEntry?
   @State private var showingDeleted = false
   @State private var editing: HistoryEntry?
-  @State private var rangeError: String?
 
   public init(state: AppState) { self.state = state }
   public var body: some View {
     VStack(spacing: 0) {
       HStack {
-        DatePicker("From", selection: $from, displayedComponents: .date)
-        DatePicker("Through", selection: $through, displayedComponents: .date)
-        TextField("Search title, description, or tag", text: $query)
+        Toggle("All time", isOn: $state.historyControls.allTime)
+        if !state.historyControls.allTime {
+          DatePicker("From", selection: $state.historyControls.from, displayedComponents: .date)
+          DatePicker(
+            "Through", selection: $state.historyControls.through, displayedComponents: .date)
+        }
+        TextField("Search title, description, or tag", text: $state.historyControls.query)
         Button("Apply") { reload() }
         Button("Export CSV…") { exportCSV() }.disabled(state.historyPage.entries.isEmpty)
       }.padding()
@@ -34,7 +34,7 @@ public struct HistoryView: View {
           Text("Loading history…")
           Button("Cancel") { state.cancelHistoryLoad() }
         }.frame(maxHeight: .infinity)
-      } else if let error = rangeError ?? state.historyError {
+      } else if let error = state.historyError {
         VStack {
           Text(error)
           Button("Try again") { reload() }
@@ -44,9 +44,7 @@ public struct HistoryView: View {
           Text(showingDeleted ? "No deleted history" : "No history in this range")
           Button("Show all history") {
             showingDeleted = false
-            query = ""
-            rangeError = nil
-            state.perform { await state.loadHistory(from: nil, through: nil, query: "") }
+            state.perform { await state.showAllHistory() }
           }
         }.frame(maxHeight: .infinity)
       } else {
@@ -90,15 +88,8 @@ public struct HistoryView: View {
   private var entries: [HistoryEntry] {
     showingDeleted ? state.recentlyDeletedHistory : state.historyPage.entries
   }
-  private func reload(append: Bool = false) {
-    do {
-      let range = try HistoryDateRange(from: from, through: through)
-      rangeError = nil
-      state.perform {
-        await state.loadHistory(
-          from: range.from, through: range.inclusiveUpperBound, query: query, append: append)
-      }
-    } catch { rangeError = "Choose a Through date on or after From, then Apply." }
+  private func reload() {
+    state.perform { await state.applyHistoryControls() }
   }
   private func exportCSV() {
     let panel = NSSavePanel()

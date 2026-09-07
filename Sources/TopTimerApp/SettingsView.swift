@@ -69,6 +69,7 @@ public struct SettingsView: View {
   private let importSound: (URL) async throws -> String
   private let operations: AppOperationOwner?
   private let updateSound: ((String?) async -> Bool)?
+  private let additionalContent: AnyView
   @State private var error: String?
   @State private var quickKeyCode = "17"
   @State private var pauseKeyCode = "35"
@@ -81,7 +82,8 @@ public struct SettingsView: View {
       throw CocoaError(.fileReadUnsupportedScheme)
     },
     operations: AppOperationOwner? = nil,
-    updateSound: ((String?) async -> Bool)? = nil
+    updateSound: ((String?) async -> Bool)? = nil,
+    additionalContent: AnyView = AnyView(EmptyView())
   ) {
     _settings = settings
     self.notificationDenied = notificationDenied
@@ -90,6 +92,7 @@ public struct SettingsView: View {
     self.importSound = importSound
     self.operations = operations
     self.updateSound = updateSound
+    self.additionalContent = additionalContent
   }
 
   public var body: some View {
@@ -153,10 +156,11 @@ public struct SettingsView: View {
           Button("Dismiss message") { self.error = nil }
         }
       }
+      additionalContent
     }
     .formStyle(.grouped)
     .padding()
-    .frame(minWidth: 460, minHeight: 520)
+    .frame(minWidth: 460, minHeight: 360)
     .accessibilityIdentifier("settings-view")
     .onAppear {
       quickKeyCode = String(settings.quickEntryShortcut?.keyCode ?? 17)

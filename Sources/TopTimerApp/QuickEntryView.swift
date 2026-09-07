@@ -29,6 +29,10 @@ public struct QuickEntryView: View {
       if let error = state.inlineError {
         Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 8)
       }
+      if state.settingsRecoveryWarning != nil {
+        Text("Settings were recovered with safe defaults. Open Settings to review and acknowledge recovery.")
+          .font(.caption).padding(.horizontal, 8)
+      }
       suggestions
       HStack(spacing: 6) {
         Button {
