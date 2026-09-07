@@ -15,7 +15,10 @@ public enum SleepAssertionError: Error, Sendable, Equatable { case negativeTimer
 
     public init(client: any PowerAssertionClient = IOPowerAssertionClient()) { self.client = client }
     isolated deinit {
-        if let assertionID { try? client.releaseAssertion(assertionID) }
+        if let assertionID {
+            do { try client.releaseAssertion(assertionID) }
+            catch { assertionFailure("TopTimer could not release its sleep assertion during deinitialization: \(error)") }
+        }
     }
 
     public func setRunningTimerCount(_ count: Int, enabled: Bool) throws {

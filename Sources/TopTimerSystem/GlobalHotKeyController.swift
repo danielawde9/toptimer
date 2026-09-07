@@ -14,11 +14,11 @@ public struct Shortcut: Sendable, Equatable, Hashable {
     }
 }
 
-public enum HotKeySlot: CaseIterable, Sendable { case quickEntry, pauseResumePriority }
+public enum HotKeySlot: CaseIterable, Sendable, Equatable { case quickEntry, pauseResumePriority }
 public struct HotKeyIdentifier: Sendable, Equatable { public let signature: UInt32; public let id: UInt32; public init(signature: UInt32, id: UInt32) { self.signature = signature; self.id = id } }
 public struct HotKeyToken: Sendable, Equatable, Hashable { public let rawValue: Int; public init(rawValue: Int) { self.rawValue = rawValue } }
 public enum HotKeyRegistrarError: Error, Sendable, Equatable { case registrationFailed(Int32), unregistrationFailed(Int32) }
-public enum GlobalHotKeyControllerError: Error, Sendable, Equatable { case invalidShortcut, shortcutConflict, registrationFailed, unregistrationFailed }
+public enum GlobalHotKeyControllerError: Error, Sendable, Equatable { case invalidShortcut, shortcutConflict, registrationFailed, unregistrationFailed, shutdownFailed([HotKeySlot]) }
 
 @MainActor public protocol HotKeyRegistrar: AnyObject, Sendable {
     func register(_ shortcut: Shortcut, identifier: HotKeyIdentifier) throws -> HotKeyToken
@@ -26,7 +26,7 @@ public enum GlobalHotKeyControllerError: Error, Sendable, Equatable { case inval
 }
 
 @MainActor public final class GlobalHotKeyController {
-    public static let signature: UInt32 = 0x5454_4D52 // TTMR
+    public nonisolated static let signature: UInt32 = 0x5454_4D52 // TTMR
     private let registrar: any HotKeyRegistrar
     private let quickEntry: @MainActor @Sendable () -> Void
     private let pauseResumePriority: @MainActor @Sendable () -> Void
@@ -40,7 +40,10 @@ public enum GlobalHotKeyControllerError: Error, Sendable, Equatable { case inval
     }
 
     isolated deinit {
-        for registration in registrations.values { try? registrar.unregister(registration.token) }
+        for registration in registrations.values {
+            do { try registrar.unregister(registration.token) }
+            catch { assertionFailure("TopTimer could not unregister an owned hotkey during deinitialization: \(error)") }
+        }
     }
 
     public func shortcut(for slot: HotKeySlot) -> Shortcut? { registrations[slot]?.shortcut }
@@ -54,27 +57,26 @@ public enum GlobalHotKeyControllerError: Error, Sendable, Equatable { case inval
         if let previous {
             do { try registrar.unregister(previous.token) }
             catch {
-                try? registrar.unregister(replacement)
+                do { try registrar.unregister(replacement) }
+                catch { preconditionFailure("TopTimer could not roll back a replacement hotkey: \(error)") }
                 throw Self.map(error)
             }
         }
         registrations[slot] = Registration(shortcut: shortcut, token: replacement)
     }
 
-    public func shutdown() {
+    public func shutdown() throws {
+        var failedSlots: [HotKeySlot] = []
         for slot in HotKeySlot.allCases {
-            guard let registration = registrations.removeValue(forKey: slot) else { continue }
-            do { try registrar.unregister(registration.token) } catch { }
+            guard let registration = registrations[slot] else { continue }
+            do { try registrar.unregister(registration.token); registrations.removeValue(forKey: slot) }
+            catch { failedSlots.append(slot) }
         }
+        guard failedSlots.isEmpty else { throw GlobalHotKeyControllerError.shutdownFailed(failedSlots) }
     }
 
-    fileprivate func handle(_ identifier: HotKeyIdentifier) {
-        guard identifier.signature == Self.signature else { return }
-        switch identifier.id {
-        case 1: quickEntry()
-        case 2: pauseResumePriority()
-        default: return
-        }
+    func handle(_ slot: HotKeySlot) {
+        switch slot { case .quickEntry: quickEntry(); case .pauseResumePriority: pauseResumePriority() }
     }
 
     private static func identifier(for slot: HotKeySlot) -> HotKeyIdentifier {
@@ -89,6 +91,13 @@ public enum GlobalHotKeyControllerError: Error, Sendable, Equatable { case inval
     private struct Registration { let shortcut: Shortcut; let token: HotKeyToken }
 }
 
+enum HotKeyEventDecoder {
+    static func slot(for identifier: HotKeyIdentifier) -> HotKeySlot? {
+        guard identifier.signature == GlobalHotKeyController.signature else { return nil }
+        switch identifier.id { case 1: return .quickEntry; case 2: return .pauseResumePriority; default: return nil }
+    }
+}
+
 @MainActor public final class CarbonHotKeyRegistrar: HotKeyRegistrar {
     private var references: [HotKeyToken: EventHotKeyRef] = [:]
     private var nextToken = 0
@@ -96,7 +105,13 @@ public enum GlobalHotKeyControllerError: Error, Sendable, Equatable { case inval
     private weak var controller: GlobalHotKeyController?
 
     public init() {}
-    isolated deinit { if let handler { RemoveEventHandler(handler) } }
+    isolated deinit {
+        for reference in references.values {
+            if UnregisterEventHotKey(reference) != noErr { assertionFailure("TopTimer could not unregister a retained Carbon hotkey during deinitialization.") }
+        }
+        references.removeAll()
+        if let handler { RemoveEventHandler(handler) }
+    }
 
     public func attach(controller: GlobalHotKeyController) { self.controller = controller }
 
@@ -135,6 +150,7 @@ public enum GlobalHotKeyControllerError: Error, Sendable, Equatable { case inval
         var eventID = EventHotKeyID()
         guard GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &eventID) == noErr else { return }
         let identifier = HotKeyIdentifier(signature: eventID.signature, id: eventID.id)
-        Task { @MainActor [weak controller] in controller?.handle(identifier) }
+        guard let slot = HotKeyEventDecoder.slot(for: identifier) else { return }
+        Task { @MainActor [weak controller] in controller?.handle(slot) }
     }
 }

@@ -40,13 +40,28 @@ final class SleepAssertionControllerTests: XCTestCase {
         try controller.setRunningTimerCount(1, enabled: true)
         XCTAssertThrowsError(try controller.setRunningTimerCount(0, enabled: true))
         XCTAssertEqual(controller.assertionID, 1)
+        client.releaseError = nil
+        try controller.releaseIfNeeded()
+    }
+
+    func testDeinitReleasesOwnedAssertion() throws {
+        let client = PowerAssertionSpy()
+        weak var weakController: SleepAssertionController?
+        do {
+            var controller: SleepAssertionController? = SleepAssertionController(client: client)
+            weakController = controller
+            try controller?.setRunningTimerCount(1, enabled: true)
+            controller = nil
+        }
+        XCTAssertNil(weakController)
+        XCTAssertEqual(client.released, [1])
     }
 }
 
 @MainActor
 private final class PowerAssertionSpy: PowerAssertionClient {
     let createError: SleepAssertionError?
-    let releaseError: SleepAssertionError?
+    var releaseError: SleepAssertionError?
     private(set) var created = 0
     private(set) var released: [SleepAssertionID] = []
 

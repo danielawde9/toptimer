@@ -42,6 +42,8 @@ final class GlobalHotKeyControllerTests: XCTestCase {
         XCTAssertThrowsError(try controller.register(try Shortcut(keyCode: 2, modifiers: 256), for: .quickEntry))
         XCTAssertEqual(registrar.operations, ["register:1", "register:2", "unregister:1", "unregister:2"])
         XCTAssertEqual(controller.shortcut(for: .quickEntry)?.keyCode, 1)
+        registrar.failingUnregistrationTokens = []
+        try controller.shutdown()
     }
 
     func testShutdownUnregistersOwnedHotKeys() throws {
@@ -50,8 +52,54 @@ final class GlobalHotKeyControllerTests: XCTestCase {
         try controller.register(try Shortcut(keyCode: 1, modifiers: 256), for: .quickEntry)
         try controller.register(try Shortcut(keyCode: 2, modifiers: 256), for: .pauseResumePriority)
 
-        controller.shutdown()
+        try controller.shutdown()
         XCTAssertEqual(registrar.operations, ["register:1", "register:2", "unregister:1", "unregister:2"])
+    }
+
+    func testShutdownRetainsFailedRegistrationRetriesItAndAttemptsOtherSlot() throws {
+        let registrar = HotKeyRegistrarSpy(failingUnregistrationTokens: [1])
+        let controller = GlobalHotKeyController(registrar: registrar)
+        let quick = try Shortcut(keyCode: 1, modifiers: 256)
+        try controller.register(quick, for: .quickEntry)
+        try controller.register(try Shortcut(keyCode: 2, modifiers: 256), for: .pauseResumePriority)
+
+        XCTAssertThrowsError(try controller.shutdown()) { error in
+            XCTAssertEqual(error as? GlobalHotKeyControllerError, .shutdownFailed([.quickEntry]))
+        }
+        XCTAssertEqual(registrar.operations, ["register:1", "register:2", "unregister:1", "unregister:2"])
+        XCTAssertEqual(controller.shortcut(for: .quickEntry), quick)
+        XCTAssertNil(controller.shortcut(for: .pauseResumePriority))
+
+        registrar.failingUnregistrationTokens = []
+        try controller.shutdown()
+        XCTAssertEqual(registrar.operations.last, "unregister:1")
+        XCTAssertNil(controller.shortcut(for: .quickEntry))
+    }
+
+    func testEventDecoderRoutesOnlyTopTimerCommandIDsAndCallbacksRunOnMainActor() {
+        XCTAssertEqual(HotKeyEventDecoder.slot(for: .init(signature: GlobalHotKeyController.signature, id: 1)), .quickEntry)
+        XCTAssertEqual(HotKeyEventDecoder.slot(for: .init(signature: GlobalHotKeyController.signature, id: 2)), .pauseResumePriority)
+        XCTAssertNil(HotKeyEventDecoder.slot(for: .init(signature: 0, id: 1)))
+        XCTAssertNil(HotKeyEventDecoder.slot(for: .init(signature: GlobalHotKeyController.signature, id: 3)))
+
+        var deliveries: [HotKeySlot] = []
+        let controller = GlobalHotKeyController(registrar: HotKeyRegistrarSpy(), quickEntry: { deliveries.append(.quickEntry); XCTAssertTrue(Thread.isMainThread) }, pauseResumePriority: { deliveries.append(.pauseResumePriority); XCTAssertTrue(Thread.isMainThread) })
+        controller.handle(.quickEntry)
+        controller.handle(.pauseResumePriority)
+        XCTAssertEqual(deliveries, [.quickEntry, .pauseResumePriority])
+    }
+
+    func testDeinitUnregistersOwnedHotKeys() throws {
+        let registrar = HotKeyRegistrarSpy()
+        weak var weakController: GlobalHotKeyController?
+        do {
+            var controller: GlobalHotKeyController? = GlobalHotKeyController(registrar: registrar)
+            weakController = controller
+            try controller?.register(try Shortcut(keyCode: 1, modifiers: 256), for: .quickEntry)
+            controller = nil
+        }
+        XCTAssertNil(weakController)
+        XCTAssertEqual(registrar.operations, ["register:1", "unregister:1"])
     }
 
     func testShortcutRejectsInvalidKeyCodeAndModifiers() {
@@ -65,10 +113,10 @@ final class GlobalHotKeyControllerTests: XCTestCase {
 private final class HotKeyRegistrarSpy: HotKeyRegistrar {
     private var nextToken = 0
     private let rejectedKeyCode: UInt32?
-    private let rejectedUnregistrationToken: Int?
+    var failingUnregistrationTokens: Set<Int>
     private(set) var operations: [String] = []
 
-    init(rejectedKeyCode: UInt32? = nil, rejectedUnregistrationToken: Int? = nil) { self.rejectedKeyCode = rejectedKeyCode; self.rejectedUnregistrationToken = rejectedUnregistrationToken }
+    init(rejectedKeyCode: UInt32? = nil, rejectedUnregistrationToken: Int? = nil, failingUnregistrationTokens: Set<Int> = []) { self.rejectedKeyCode = rejectedKeyCode; self.failingUnregistrationTokens = failingUnregistrationTokens.union(rejectedUnregistrationToken.map { [$0] } ?? []) }
 
     func register(_ shortcut: Shortcut, identifier: HotKeyIdentifier) throws -> HotKeyToken {
         operations.append("register:\(shortcut.keyCode)")
@@ -77,5 +125,5 @@ private final class HotKeyRegistrarSpy: HotKeyRegistrar {
         return HotKeyToken(rawValue: nextToken)
     }
 
-    func unregister(_ token: HotKeyToken) throws { operations.append("unregister:\(token.rawValue)"); if token.rawValue == rejectedUnregistrationToken { throw HotKeyRegistrarError.unregistrationFailed(-9877) } }
+    func unregister(_ token: HotKeyToken) throws { operations.append("unregister:\(token.rawValue)"); if failingUnregistrationTokens.contains(token.rawValue) { throw HotKeyRegistrarError.unregistrationFailed(-9877) } }
 }
