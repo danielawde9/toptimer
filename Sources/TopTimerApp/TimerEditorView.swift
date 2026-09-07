@@ -4,6 +4,7 @@ import TopTimerDomain
 public struct EditorDraft: Equatable, Sendable {
     public var title = ""; public var details = ""; public var tags: [String] = []; public var duration: TimeInterval = 300; public var volume = 1.0
     public init() {}
+    public init(timer: TimerItem) { title = timer.title; details = timer.details; tags = timer.tags; duration = timer.duration ?? 300; volume = timer.alertVolume }
     public func validationError() -> String? {
         if title.count > TimerLimits.title { return "Title must be 80 characters or fewer." }
         if details.count > TimerLimits.details { return "Details must be 500 characters or fewer." }

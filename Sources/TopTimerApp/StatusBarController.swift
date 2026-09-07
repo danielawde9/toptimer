@@ -16,5 +16,9 @@ import TopTimerDomain
     private func render(_ timer: TimerItem?) { let title = StatusTitleFormatter.format(timer: timer, now: .now, mode: state.preferences.statusDisplayMode); item.button?.title = title.text; item.button?.image = state.preferences.showsStatusIcon && title.showsIcon ? NSImage(systemSymbolName: "hourglass", accessibilityDescription: "TopTimer") : nil; item.button?.font = .monospacedDigitSystemFont(ofSize: 0, weight: .regular); item.button?.setAccessibilityLabel(title.accessibilityLabel) }
 }
 private struct PopoverRoot: View { @ObservedObject var state: AppState; @State var showingList: Bool; let onListChange: (Bool) -> Void
-    var body: some View { VStack(spacing: 0) { QuickEntryView(state: state, showingList: $showingList); if showingList { Divider(); TimerListView(state: state) } }.onChange(of: showingList) { value in onListChange(value) } }
+    var body: some View { VStack(spacing: 0) { QuickEntryView(state: state, showingList: $showingList); if showingList { Divider(); TimerListView(state: state) } }.onChange(of: showingList) { value in onListChange(value) }.sheet(isPresented: Binding(get: { state.selectedEditorTimer != nil }, set: { if !$0 { Task { await state.selectEditor(nil) } } })) { if let timer = state.selectedEditorTimer { EditorSheet(timer: timer, state: state) } } }
+}
+private struct EditorSheet: View { let timer: TimerItem; @ObservedObject var state: AppState; @State private var draft: EditorDraft
+    init(timer: TimerItem, state: AppState) { self.timer = timer; self.state = state; _draft = State(initialValue: EditorDraft(timer: timer)) }
+    var body: some View { TimerEditorView(draft: $draft) { Task { _ = await state.edit(timer.id, title: draft.title, details: draft.details, tags: draft.tags) } } }
 }
