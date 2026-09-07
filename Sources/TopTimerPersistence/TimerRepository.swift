@@ -217,8 +217,8 @@ public actor TimerCoreDataRepository: TimerRepository {
         return try await store.perform { context in
             let request = NSFetchRequest<TimerRecord>(entityName: "TimerRecord")
             request.predicate = NSPredicate(
-                format: "deletedAt == nil AND (state == %@ OR state == %@ OR state == %@)",
-                TimerState.idle.rawValue, TimerState.running.rawValue, TimerState.paused.rawValue
+                format: "deletedAt == nil AND (state == %@ OR state == %@ OR state == %@ OR state == %@)",
+                TimerState.idle.rawValue, TimerState.running.rawValue, TimerState.paused.rawValue, TimerState.completed.rawValue
             )
             request.sortDescriptors = [
                 NSSortDescriptor(key: "deadline", ascending: true),

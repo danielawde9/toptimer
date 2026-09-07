@@ -387,7 +387,7 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(first.activeTimers.count, 2)
         let completedID = try XCTUnwrap(first.activeTimers.first { $0.title == "Done" }?.id)
         await first.refresh(now: created.addingTimeInterval(60))
-        XCTAssertFalse(first.activeTimers.contains { $0.id == completedID })
+        XCTAssertEqual(first.activeTimers.first { $0.id == completedID }?.state, .completed)
         try await firstStore.close()
 
         let secondStore = try await CoreDataStore.sqlite(at: url)
@@ -401,7 +401,7 @@ final class AppStateTests: XCTestCase {
         )
         await second.load()
 
-        XCTAssertEqual(second.activeTimers.map(\.title), ["Focus"])
+        XCTAssertEqual(second.activeTimers.map(\.title), ["Done", "Focus"])
         XCTAssertEqual(second.historyPage.entries.count, 1)
         XCTAssertEqual(second.suggestions, ["1m Done #work", "5m Focus #work"])
         let historyCount = try await secondRepository.historyCount(for: completedID, limit: 100)

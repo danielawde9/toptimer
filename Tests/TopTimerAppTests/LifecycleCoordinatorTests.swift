@@ -16,12 +16,13 @@ final class LifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.closeResult(.success), [.replyToTermination(true)])
     }
 
-    func testTerminateFailureIsDeterministicAndReentrantRequestsAreIgnored() {
+    func testTerminateFailureStaysPendingUntilAnExplicitQuit() {
         var coordinator = LifecycleCoordinator()
         _ = coordinator.startResult(.success)
         XCTAssertEqual(coordinator.requestTermination(), [.beginClose, .stopResources])
         XCTAssertEqual(coordinator.requestTermination(), [])
-        XCTAssertEqual(coordinator.closeResult(.failure), [.reportCloseFailure, .replyToTermination(true)])
-        XCTAssertEqual(coordinator.closeResult(.success), [])
+        XCTAssertEqual(coordinator.closeResult(.failure), [.reportCloseFailure])
+        XCTAssertEqual(coordinator.requestTermination(), [])
+        XCTAssertEqual(coordinator.quitAfterCloseFailure(), [.replyToTermination(true)])
     }
 }

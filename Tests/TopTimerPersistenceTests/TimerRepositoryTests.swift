@@ -550,7 +550,8 @@ final class TimerRepositoryTests: XCTestCase {
 
         let repository = TimerCoreDataRepository(store: try await CoreDataStore.sqlite(at: url), calendar: utcCalendar)
         let recovered = try await repository.active(limit: 10)
-        XCTAssertEqual(recovered, [active])
+        XCTAssertTrue(recovered.contains(where: { $0.id == done.id && $0.state == .completed }))
+        XCTAssertTrue(recovered.contains(where: { $0.id == active.id }))
         let historyCount = try await repository.historyCount(for: done.id)
         XCTAssertEqual(historyCount, 1)
     }
