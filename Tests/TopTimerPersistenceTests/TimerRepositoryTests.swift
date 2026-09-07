@@ -1094,6 +1094,7 @@ private actor ProtocolRepositoryFake: TimerRepository {
     func update(_ timer: TimerItem) async throws {}
 
     func active(limit: Int) async throws -> [TimerItem] { [] }
+    func due(at date: Date, limit: Int) async throws -> [TimerItem] { [] }
 
     func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome {
         let created = Date(timeIntervalSinceReferenceDate: 0)

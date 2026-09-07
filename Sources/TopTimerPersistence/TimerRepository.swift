@@ -8,6 +8,8 @@ public enum TimerRepositoryError: Error, Equatable, Sendable {
     case unsupportedPayloadVersion(Int)
     case malformedPayload
     case presetUseCountOverflow
+    case presetCapacityReached
+    case invalidPresetQuery
     case staleTimerUpdate
     case staleHistoryUpdate
 }
@@ -16,6 +18,7 @@ public protocol TimerRepository: Sendable {
     func insert(_ timer: TimerItem) async throws -> TimerItem
     func update(_ timer: TimerItem) async throws
     func active(limit: Int) async throws -> [TimerItem]
+    func due(at date: Date, limit: Int) async throws -> [TimerItem]
     func activePage(limit: Int, after cursor: TimerPageCursor?) async throws -> TimerPage
     func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome
     func cancel(id: UUID, at date: Date) async throws -> TimerItem
@@ -216,6 +219,18 @@ public actor TimerCoreDataRepository: TimerRepository {
                 NSSortDescriptor(key: "createdAt", ascending: true),
                 NSSortDescriptor(key: "id", ascending: true)
             ]
+            request.fetchLimit = limit
+            return try context.fetch(request).map { try TimerPayloadCodec.decodeTimer($0.payload) }
+        }
+    }
+
+    public func due(at date: Date, limit: Int) async throws -> [TimerItem] {
+        guard date.timeIntervalSinceReferenceDate.isFinite else { return [] }
+        let limit = min(100, Self.boundedLimit(limit))
+        return try await store.perform { context in
+            let request = NSFetchRequest<TimerRecord>(entityName: "TimerRecord")
+            request.predicate = NSPredicate(format: "deletedAt == nil AND state == %@ AND deadline != nil AND deadline <= %@", TimerState.running.rawValue, date as NSDate)
+            request.sortDescriptors = [NSSortDescriptor(key: "deadline", ascending: true), NSSortDescriptor(key: "id", ascending: true)]
             request.fetchLimit = limit
             return try context.fetch(request).map { try TimerPayloadCodec.decodeTimer($0.payload) }
         }

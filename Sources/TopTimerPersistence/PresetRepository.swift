@@ -123,7 +123,8 @@ private struct AnyCodingKey: CodingKey {
 }
 
 public actor PresetCoreDataRepository: PresetRepository {
-    private static let scanLimit = 10_000
+    private static let maximumActivePresets = 10_000
+    private static let scanLimit = maximumActivePresets + 1
     private let store: CoreDataStore
     public init(store: CoreDataStore) { self.store = store }
 
@@ -132,6 +133,9 @@ public actor PresetCoreDataRepository: PresetRepository {
         return try await store.perform { context in
             do {
                 let records = try Self.fetch(context)
+                let decoded = try records.map { try PresetPayloadCodec.decode($0.payload) }
+                let activeCount = decoded.filter { $0.deletedAt == nil }.count
+                guard activeCount <= Self.maximumActivePresets else { throw TimerRepositoryError.presetCapacityReached }
                 if let record = try records.first(where: { record in
                     let preset = try PresetPayloadCodec.decode(record.payload)
                     return preset.commandKey == candidate.commandKey && preset.tags == candidate.tags
@@ -142,6 +146,7 @@ public actor PresetCoreDataRepository: PresetRepository {
                     record.createdAt = updated.createdAt; record.deletedAt = nil; record.payload = try PresetPayloadCodec.encode(updated)
                     try context.save(); return updated
                 }
+                guard activeCount < Self.maximumActivePresets else { throw TimerRepositoryError.presetCapacityReached }
                 let record = PresetRecord(context: context)
                 record.id = candidate.id; record.createdAt = candidate.createdAt; record.deletedAt = nil; record.payload = try PresetPayloadCodec.encode(candidate)
                 try context.save(); return candidate
@@ -150,9 +155,12 @@ public actor PresetCoreDataRepository: PresetRepository {
     }
 
     public func suggestions(query: String, limit: Int) async throws -> [TimerPreset] {
+        guard query.count <= 2_048 else { throw TimerRepositoryError.invalidPresetQuery }
         let cap = min(20, max(1, limit)); let tokens = TimerPreset.normalizedTags(query.split(whereSeparator: { $0.isWhitespace }).map(String.init))
+        guard tokens.count <= 12 else { throw TimerRepositoryError.invalidPresetQuery }
         return try await store.perform { context in
             let values = try Self.fetch(context).compactMap { record -> TimerPreset? in let preset = try PresetPayloadCodec.decode(record.payload); return preset.deletedAt == nil ? preset : nil }
+            guard values.count <= Self.maximumActivePresets else { throw TimerRepositoryError.presetCapacityReached }
             return values.sorted { left, right in
                 let lMatch = tokens.contains { token in left.tags.contains { $0.hasPrefix(token) } }
                 let rMatch = tokens.contains { token in right.tags.contains { $0.hasPrefix(token) } }

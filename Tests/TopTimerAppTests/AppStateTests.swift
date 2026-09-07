@@ -321,7 +321,8 @@ final class AppStateTests: XCTestCase {
         await repository.releaseActive()
         await first.value
         let operations = await repository.recordedOperations()
-        XCTAssertEqual(operations.filter { $0 == "publish" }.count, 2, "one scan inside refresh and one final publish")
+        XCTAssertEqual(operations.filter { $0 == "due" }.count, 1, "only one due scan overlaps")
+        XCTAssertEqual(operations.filter { $0 == "publish" }.count, 1, "only the winning refresh publishes")
     }
 
     func testRecurringDueRefreshPersistsAndSchedulesOneSuccessorIdempotently() async throws {
@@ -437,6 +438,10 @@ actor RecordingRepository: TimerRepository {
             await withCheckedContinuation { activeContinuation = $0 }
         }
         return Array(timers.values.filter { $0.state == .idle || $0.state == .running || $0.state == .paused }.sorted { $0.id.uuidString < $1.id.uuidString }.prefix(limit))
+    }
+    func due(at date: Date, limit: Int) async throws -> [TimerItem] {
+        try record("due")
+        return Array(timers.values.filter { $0.kind == .countdown && $0.state == .running && ($0.deadline ?? .distantFuture) <= date }.sorted { ($0.deadline ?? .distantFuture, $0.id.uuidString) < ($1.deadline ?? .distantFuture, $1.id.uuidString) }.prefix(min(100, max(1, limit))))
     }
     func activePage(limit: Int, after: TimerPageCursor?) async throws -> TimerPage { .init(timers: try await active(limit: limit), nextCursor: nil) }
     func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome {
