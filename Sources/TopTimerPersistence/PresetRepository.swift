@@ -126,7 +126,7 @@ public actor PresetCoreDataRepository: PresetRepository {
     private static let defaultMaximumStoredPresets = 10_000
     private let store: CoreDataStore
     private let maximumStoredPresets: Int
-    public init(store: CoreDataStore, maximumStoredPresets: Int = 10_000) { self.store = store; self.maximumStoredPresets = max(1, maximumStoredPresets) }
+    public init(store: CoreDataStore, maximumStoredPresets: Int = 10_000) { self.store = store; self.maximumStoredPresets = min(10_000, max(1, maximumStoredPresets)) }
 
     public func record(command: String, tags: [String], at date: Date) async throws -> TimerPreset {
         let candidate = try TimerPreset(command: command, tags: tags, createdAt: date, lastUsed: date)

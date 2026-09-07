@@ -11,6 +11,7 @@ public enum TimerRepositoryError: Error, Equatable, Sendable {
     case presetCapacityReached
     case invalidPresetQuery
     case duplicatePreset
+    case priorityCandidateCapacityReached
     case staleTimerUpdate
     case staleHistoryUpdate
 }
@@ -20,6 +21,7 @@ public protocol TimerRepository: Sendable {
     func update(_ timer: TimerItem) async throws
     func active(limit: Int) async throws -> [TimerItem]
     func due(at date: Date, limit: Int) async throws -> [TimerItem]
+    func priority(at date: Date) async throws -> TimerItem?
     func activePage(limit: Int, after cursor: TimerPageCursor?) async throws -> TimerPage
     func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome
     func cancel(id: UUID, at date: Date) async throws -> TimerItem
@@ -167,6 +169,7 @@ public enum TimerPayloadCodec {
 
 public actor TimerCoreDataRepository: TimerRepository {
     private static let maximumLimit = 200
+    private static let maximumPriorityCandidates = 10_000
     // Search may inspect at most 10,000 raw rows per call; callers continue with the cursor.
     private static let maximumHistorySearchScan = 10_000
     private let store: CoreDataStore
@@ -234,6 +237,19 @@ public actor TimerCoreDataRepository: TimerRepository {
             request.sortDescriptors = [NSSortDescriptor(key: "deadline", ascending: true), NSSortDescriptor(key: "id", ascending: true)]
             request.fetchLimit = limit
             return try context.fetch(request).map { try TimerPayloadCodec.decodeTimer($0.payload) }
+        }
+    }
+
+    public func priority(at date: Date) async throws -> TimerItem? {
+        guard date.timeIntervalSinceReferenceDate.isFinite else { return nil }
+        return try await store.perform { context in
+            let request = NSFetchRequest<TimerRecord>(entityName: "TimerRecord")
+            request.predicate = NSPredicate(format: "deletedAt == nil AND state == %@", TimerState.running.rawValue)
+            request.sortDescriptors = [NSSortDescriptor(key: "id", ascending: true)]
+            request.fetchLimit = Self.maximumPriorityCandidates + 1
+            let records = try context.fetch(request)
+            guard records.count <= Self.maximumPriorityCandidates else { throw TimerRepositoryError.priorityCandidateCapacityReached }
+            return TimerPriority.select(from: try records.map { try TimerPayloadCodec.decodeTimer($0.payload) }, at: date)
         }
     }
 

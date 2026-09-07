@@ -443,6 +443,7 @@ actor RecordingRepository: TimerRepository {
         try record("due")
         return Array(timers.values.filter { $0.kind == .countdown && $0.state == .running && ($0.deadline ?? .distantFuture) <= date }.sorted { ($0.deadline ?? .distantFuture, $0.id.uuidString) < ($1.deadline ?? .distantFuture, $1.id.uuidString) }.prefix(min(100, max(1, limit))))
     }
+    func priority(at date: Date) async throws -> TimerItem? { TimerPriority.select(from: Array(timers.values), at: date) }
     func activePage(limit: Int, after: TimerPageCursor?) async throws -> TimerPage { .init(timers: try await active(limit: limit), nextCursor: nil) }
     func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome {
         try record("complete")

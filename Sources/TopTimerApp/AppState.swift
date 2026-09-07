@@ -106,13 +106,13 @@ public final class AppState: ObservableObject {
                 if let successor = outcome.successor { await scheduleAfterPersistence(successor) }
             }
         } catch { inlineError = "Could not refresh timers." }
-        await publishActive()
+        await publishActive(at: date)
     }
 
-    private func publishActive() async {
+    private func publishActive(at date: Date? = nil) async {
         do {
             activeTimers = Array(try await repository.active(limit: 100).prefix(100))
-            priorityTimer = TimerPriority.select(from: activeTimers, at: now())
+            priorityTimer = try await repository.priority(at: date ?? now())
         } catch {
             inlineError = "Could not refresh timers."
         }
