@@ -410,6 +410,8 @@ final class AppStateTests: XCTestCase {
 }
 
 actor RecordingRepository: TimerRepository {
+    var historyHandler: (@Sendable (Date?, Date?, String, Int, HistoryPageCursor?) async throws -> HistoryPage)?
+    func setHistoryHandler(_ handler: @escaping @Sendable (Date?, Date?, String, Int, HistoryPageCursor?) async throws -> HistoryPage) { historyHandler = handler }
     func deleted(limit: Int) async throws -> [TimerItem] { [] }
     func restore(_ id: UUID, at date: Date) async throws { operations.append("restore") }
     var operations: [String] = []
@@ -478,7 +480,10 @@ actor RecordingRepository: TimerRepository {
         guard var timer = timers[id] else { throw TimerRepositoryError.timerNotFound }
         try timer.softDelete(at: date); timers[id] = timer
     }
-    func historyPage(from: Date?, through: Date?, query: String, limit: Int, after: HistoryPageCursor?) async throws -> HistoryPage { .init(entries: [], nextCursor: nil) }
+    func historyPage(from: Date?, through: Date?, query: String, limit: Int, after: HistoryPageCursor?) async throws -> HistoryPage {
+        if let historyHandler { return try await historyHandler(from, through, query, limit, after) }
+        return .init(entries: [], nextCursor: nil)
+    }
     func updateHistory(_ history: HistoryEntry) async throws {}
     func softDeleteHistory(_ id: UUID, at: Date) async throws {}
     func recoverHistory(_ id: UUID) async throws { await recorder?.record("recover") }

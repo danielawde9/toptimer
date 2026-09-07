@@ -16,7 +16,13 @@ import TopTimerSystem
   private var subscriptions = Set<AnyCancellable>()
   private var showingList = false
   private var shortcutOrigin: NSRunningApplication?
-  public init(state: AppState, updateHotKey: @escaping (HotKeySlot, Shortcut) -> String? = { _, _ in nil }, updateLogin: @escaping (Bool) -> String? = { _ in nil }, importSound: @escaping (URL) async throws -> String = { _ in throw CocoaError(.fileReadUnsupportedScheme) }) {
+  public init(
+    state: AppState, updateHotKey: @escaping (HotKeySlot, Shortcut) -> String? = { _, _ in nil },
+    updateLogin: @escaping (Bool) -> String? = { _ in nil },
+    importSound: @escaping (URL) async throws -> String = { _ in
+      throw CocoaError(.fileReadUnsupportedScheme)
+    }
+  ) {
     self.state = state
     self.updateHotKey = updateHotKey
     self.updateLogin = updateLogin
@@ -62,17 +68,16 @@ import TopTimerSystem
   public func close() { popover.performClose(nil) }
   private func openSettings() {
     windows.show(kind: .settings) {
-      SettingsView(
-        settings: Binding(get: { self.state.preferences }, set: { self.state.preferences = $0 }),
-        notificationDenied: self.state.notificationStatus == .authorizationDenied
-          || self.state.notificationStatus == .notAuthorized(.denied),
-        updateHotKey: self.updateHotKey, updateLogin: self.updateLogin,
-        importSound: self.importSound, operations: self.state.operations)
+      SettingsWindowRoot(
+        state: self.state, updateHotKey: self.updateHotKey, updateLogin: self.updateLogin,
+        importSound: self.importSound)
     }
   }
   private func openTimerList() {
     windows.show(kind: .timerList) {
-      TimerListView(state: self.state, openHistory: { [weak self] in self?.openHistory() }, openReports: { [weak self] in self?.openReports() })
+      TimerListView(
+        state: self.state, openHistory: { [weak self] in self?.openHistory() },
+        openReports: { [weak self] in self?.openReports() })
     }
   }
   private func openHistory() { windows.show(kind: .history) { HistoryView(state: self.state) } }
@@ -85,13 +90,45 @@ import TopTimerSystem
   }
   private func render(_ timer: TimerItem?) {
     let title = StatusTitleFormatter.format(
-      timer: timer, now: .now, mode: state.preferences.statusDisplayMode)
-    item.button?.title = title.text
+      timer: timer, now: .now, mode: state.preferences.statusDisplayMode,
+      uses24HourTime: state.preferences.uses24HourTime)
+    item.button?.title =
+      title.text.isEmpty && !state.preferences.showsStatusIcon ? "TopTimer" : title.text
     item.button?.image =
       state.preferences.showsStatusIcon && title.showsIcon
       ? NSImage(systemSymbolName: "hourglass", accessibilityDescription: "TopTimer") : nil
     item.button?.font = .monospacedDigitSystemFont(ofSize: 0, weight: .regular)
     item.button?.setAccessibilityLabel(title.accessibilityLabel)
+  }
+}
+private struct SettingsWindowRoot: View {
+  @ObservedObject var state: AppState
+  let updateHotKey: (HotKeySlot, Shortcut) -> String?
+  let updateLogin: (Bool) -> String?
+  let importSound: (URL) async throws -> String
+  var body: some View {
+    VStack {
+      SettingsView(
+        settings: $state.preferences,
+        notificationDenied: state.notificationStatus == .authorizationDenied
+          || state.notificationStatus == .notAuthorized(.denied),
+        updateHotKey: { state.changeHotKey($1, slot: $0, apply: updateHotKey) },
+        updateLogin: { state.changeLogin($0, apply: updateLogin) },
+        importSound: importSound, operations: state.operations,
+        updateSound: { await state.changeDefaultSound($0) })
+      if let error = state.settingsError { Text(error).foregroundStyle(.red) }
+      if let error = state.soundError { Text(error).foregroundStyle(.red) }
+      if let error = state.loginError { Text(error).foregroundStyle(.red) }
+      if let error = state.hotKeyError { Text(error).foregroundStyle(.red) }
+      if let error = state.sleepError {
+        Text(error).foregroundStyle(.red)
+        Button("Retry sleep prevention") { state.updateSleepAssertion() }
+      }
+      if let error = state.retentionError {
+        Text(error).foregroundStyle(.red)
+        Button("Retry retention") { state.perform { await state.applyRetention() } }
+      }
+    }
   }
 }
 private struct PopoverRoot: View {
@@ -104,7 +141,9 @@ private struct PopoverRoot: View {
   let openTimerList: () -> Void
   var body: some View {
     VStack(spacing: 0) {
-      QuickEntryView(state: state, showingList: $showingList, closePopover: closePopover, openSettings: openSettings, openTimerList: openTimerList)
+      QuickEntryView(
+        state: state, showingList: $showingList, closePopover: closePopover,
+        openSettings: openSettings, openTimerList: openTimerList)
       if showingList {
         Divider()
         TimerListView(state: state)
@@ -137,7 +176,8 @@ private struct EditorSheet: View {
         Text(error).font(.caption).foregroundStyle(.red)
         Button("Retry loading sounds") { sounds.refresh() }
       }
-      TimerEditorView(draft: $draft, catalog: sounds.catalog, operations: state.operations) { configuration in
+      TimerEditorView(draft: $draft, catalog: sounds.catalog, operations: state.operations) {
+        configuration in
         await state.reconfigure(timer.id, configuration: configuration)
       }
     }.onAppear { sounds.refresh() }

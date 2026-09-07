@@ -46,3 +46,23 @@ admission/cleanup, and real AppState/Core Data persistence-before-close coverage
 Archive timestamps do not establish deletion provenance. The acknowledged-row
 repository test proves both recovery-query exclusion and restore rejection with
 unchanged persisted content; do not derive recoverability from deletedAt alone.
+
+## 2026-09-07 — Query and preference ownership must reach production
+
+History and Reports cannot share a page or loading guard: independent windows
+issue independent requests. Retain each filter, assign request identities before
+awaiting, check them before publication, and invalidate them on Cancel. A report
+must consume all pages within its declared hard cap or fail explicitly. Window
+shutdown snapshots and clears ownership before close delegates mutate it.
+
+Preference controls are not implementation proof. Trace every value through
+startup decoding, validated save, runtime controller, and relaunch. New timer
+defaults belong in the factory, not reconfigure (which increments the revision
+and makes a newly inserted timer invalid). Notification action factories must
+preserve sound identity and volume. Date-only bounds use calendar day boundaries,
+never 86,400-second assumptions.
+
+Executable detectors: SettingsStoreTests, Task11BehaviorTests, and
+Task11RenderedTests cover these boundaries, including real SQLite reopen,
+native history/report tables, four-window close, deterministic concurrent
+requests, CSV failure isolation, DST days, and report capacity rejection.

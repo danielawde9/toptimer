@@ -33,10 +33,15 @@ public protocol TimerRepository: Sendable {
     func updateHistory(_ history: HistoryEntry) async throws
     func softDeleteHistory(_ id: UUID, at date: Date) async throws
     func recoverHistory(_ id: UUID) async throws
+    func deletedHistory(limit: Int) async throws -> [HistoryEntry]
     func purgeHistory(endedBefore cutoff: Date) async throws -> Int
     func historyCount(for timerID: UUID, limit: Int) async throws -> Int
     func successors(of occurrenceID: UUID, limit: Int) async throws -> [TimerItem]
     func timer(id: UUID) async throws -> TimerItem
+}
+
+extension TimerRepository {
+    public func deletedHistory(limit: Int) async throws -> [HistoryEntry] { [] }
 }
 
 public struct TimerPageCursor: Codable, Equatable, Sendable {
@@ -171,6 +176,16 @@ public enum TimerPayloadCodec {
 }
 
 public actor TimerCoreDataRepository: TimerRepository {
+    public func deletedHistory(limit: Int) async throws -> [HistoryEntry] {
+        let limit = Self.boundedLimit(limit)
+        return try await store.perform { context in
+            let request = NSFetchRequest<HistoryRecord>(entityName: "HistoryRecord")
+            request.predicate = NSPredicate(format: "deletedAt != nil")
+            request.sortDescriptors = [NSSortDescriptor(key: "deletedAt", ascending: false), NSSortDescriptor(key: "id", ascending: false)]
+            request.fetchLimit = limit
+            return try context.fetch(request).map { try TimerPayloadCodec.decodeHistory($0.payload) }
+        }
+    }
     private static let maximumLimit = 200
     private static let defaultMaximumPriorityCandidates = 10_000
     // Search may inspect at most 10,000 raw rows per call; callers continue with the cursor.

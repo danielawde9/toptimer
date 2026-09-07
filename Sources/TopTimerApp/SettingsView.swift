@@ -5,6 +5,16 @@ import TopTimerSystem
 public enum HistoryRetention: String, CaseIterable, Sendable, Equatable {
   case sevenDays, thirtyDays, ninetyDays, oneYear, unlimited
 
+  public var days: Int? {
+    switch self {
+    case .sevenDays: 7
+    case .thirtyDays: 30
+    case .ninetyDays: 90
+    case .oneYear: 365
+    case .unlimited: nil
+    }
+  }
+
   var title: String {
     switch self {
     case .sevenDays: "7 days"
@@ -58,6 +68,7 @@ public struct SettingsView: View {
   private let updateLogin: (Bool) -> String?
   private let importSound: (URL) async throws -> String
   private let operations: AppOperationOwner?
+  private let updateSound: ((String?) async -> Bool)?
   @State private var error: String?
   @State private var quickKeyCode = "17"
   @State private var pauseKeyCode = "35"
@@ -66,8 +77,11 @@ public struct SettingsView: View {
     settings: Binding<TopTimerSettings>, notificationDenied: Bool = false,
     updateHotKey: @escaping (HotKeySlot, Shortcut) -> String? = { _, _ in nil },
     updateLogin: @escaping (Bool) -> String? = { _ in nil },
-    importSound: @escaping (URL) async throws -> String = { _ in throw CocoaError(.fileReadUnsupportedScheme) },
-    operations: AppOperationOwner? = nil
+    importSound: @escaping (URL) async throws -> String = { _ in
+      throw CocoaError(.fileReadUnsupportedScheme)
+    },
+    operations: AppOperationOwner? = nil,
+    updateSound: ((String?) async -> Bool)? = nil
   ) {
     _settings = settings
     self.notificationDenied = notificationDenied
@@ -75,6 +89,7 @@ public struct SettingsView: View {
     self.updateLogin = updateLogin
     self.importSound = importSound
     self.operations = operations
+    self.updateSound = updateSound
   }
 
   public var body: some View {
@@ -90,16 +105,35 @@ public struct SettingsView: View {
       }
       Section("Shortcuts") {
         shortcutRow("Open quick entry", text: $quickKeyCode, slot: .quickEntry)
-        shortcutRow("Pause or resume priority timer", text: $pauseKeyCode, slot: .pauseResumePriority)
+        shortcutRow(
+          "Pause or resume priority timer", text: $pauseKeyCode, slot: .pauseResumePriority)
       }
       Section("Alerts") {
-        TextField("Sound", text: Binding(get: { settings.defaultAlertName ?? "" }, set: { settings.defaultAlertName = $0.isEmpty ? nil : $0 }))
+        Picker(
+          "Default sound",
+          selection: Binding(
+            get: { settings.defaultAlertName ?? "" },
+            set: { chooseDefaultSound($0.isEmpty ? nil : $0) })
+        ) {
+          Text("Default").tag("")
+          ForEach(SoundCatalog.builtIn.names, id: \.self) { Text($0).tag($0) }
+          if let name = settings.defaultAlertName, !SoundCatalog.builtIn.names.contains(name) {
+            Text(name).tag(name)
+          }
+        }
         Slider(value: $settings.alertVolume, in: 0...1) { Text("Alert volume") }
-        Stepper("Snooze: \(Int(settings.snoozeSeconds / 60)) min", value: $settings.snoozeSeconds, in: 60...86_400, step: 60)
+        Stepper(
+          "Snooze: \(Int(settings.snoozeSeconds / 60)) min", value: $settings.snoozeSeconds,
+          in: 60...86_400, step: 60)
         Button("Import sound…") { chooseSound() }
         if notificationDenied {
-          Text("Notifications are off. Timers continue to run without them.").foregroundStyle(.secondary)
-          Button("Open Notification Settings") { Self.openNotificationSettings() }
+          Text("Notifications are off. Timers continue to run without them.").foregroundStyle(
+            .secondary)
+          Button("Open Notification Settings") {
+            if !NotificationSettingsLink.open() {
+              error = "Open System Settings, then Notifications, and select TopTimer."
+            }
+          }
         }
       }
       Section("System") {
@@ -114,13 +148,20 @@ public struct SettingsView: View {
         }
       }
       if let error {
-        Section { Text(error).foregroundStyle(.red); Button("Try again") { self.error = nil } }
+        Section {
+          Text(error).foregroundStyle(.red)
+          Button("Dismiss message") { self.error = nil }
+        }
       }
     }
     .formStyle(.grouped)
     .padding()
     .frame(minWidth: 460, minHeight: 520)
     .accessibilityIdentifier("settings-view")
+    .onAppear {
+      quickKeyCode = String(settings.quickEntryShortcut?.keyCode ?? 17)
+      pauseKeyCode = String(settings.pauseResumeShortcut?.keyCode ?? 35)
+    }
   }
 
   private func shortcutRow(_ title: String, text: Binding<String>, slot: HotKeySlot) -> some View {
@@ -129,20 +170,33 @@ public struct SettingsView: View {
       Spacer()
       TextField("Key code", text: text).frame(width: 72)
       Button("Set") {
-        guard let code = UInt32(text.wrappedValue), let shortcut = try? Shortcut(keyCode: code, modifiers: 768) else {
+        guard let code = UInt32(text.wrappedValue),
+          let shortcut = try? Shortcut(keyCode: code, modifiers: 768)
+        else {
           error = "Enter a valid key code. The previous shortcut is unchanged."
           return
         }
-        if let message = updateHotKey(slot, shortcut) { error = message }
-        else if slot == .quickEntry { settings.quickEntryShortcut = shortcut }
-        else { settings.pauseResumeShortcut = shortcut }
+        if let message = updateHotKey(slot, shortcut) {
+          error = message
+        } else {
+          error = nil
+          if slot == .quickEntry {
+            settings.quickEntryShortcut = shortcut
+          } else {
+            settings.pauseResumeShortcut = shortcut
+          }
+        }
       }
     }
   }
 
   private func setLogin(_ enabled: Bool) {
-    if let message = updateLogin(enabled) { error = message; return }
+    if let message = updateLogin(enabled) {
+      error = message
+      return
+    }
     settings.launchesAtLogin = enabled
+    error = nil
   }
 
   private func chooseSound() {
@@ -150,16 +204,44 @@ public struct SettingsView: View {
     panel.canChooseDirectories = false
     panel.allowsMultipleSelection = false
     guard panel.runModal() == .OK, let url = panel.url else { return }
-    let previous = settings.defaultAlertName
     let work: @MainActor @Sendable () async -> Void = {
-      do { settings.defaultAlertName = try await importSound(url) }
-      catch { settings.defaultAlertName = previous; self.error = "Could not import that sound. The previous sound is unchanged." }
+      do {
+        let name = try await importSound(url)
+        if let updateSound { _ = await updateSound(name) } else { settings.defaultAlertName = name }
+        error = nil
+      } catch {
+        self.error =
+          "Could not import that sound. The previous sound is unchanged. Retry Import sound or choose another file."
+      }
     }
-    if let operations { _ = operations.submit(work) } else { Task { await work() } }
+    if let operations {
+      if !operations.submit(work) {
+        error = "Sound import is busy. Retry when the current operation completes."
+      }
+    } else {
+      Task { await work() }
+    }
   }
 
-  private static func openNotificationSettings() {
-    guard let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") else { return }
-    NSWorkspace.shared.open(url)
+  private func chooseDefaultSound(_ name: String?) {
+    guard let updateSound else {
+      settings.defaultAlertName = name
+      return
+    }
+    guard let operations, operations.submit({ _ = await updateSound(name) }) else {
+      error = "Sound selection is busy. Retry when ready."
+      return
+    }
+  }
+}
+
+public enum NotificationSettingsLink {
+  @MainActor public static func open(using open: (URL) -> Bool = { NSWorkspace.shared.open($0) })
+    -> Bool
+  {
+    guard
+      let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+    else { return false }
+    return open(url)
   }
 }

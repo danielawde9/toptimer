@@ -55,3 +55,19 @@ Core Data. Acknowledged timers are excluded from Recently Deleted and cannot be
 restored. Real Core Data regressions and deterministic shutdown tests pass.
 224 tests, strict warning-as-error debug/release builds, and diff check pass.
 See task-10-quality-final-fix-report.md. Independent review remains pending.
+
+## Task 11 fix round 2
+
+Supersedes the earlier Task 11 completion summary and its documented omissions.
+Versioned settings now load before runtime composition and save validated changes;
+all settings have runtime consumers. History and Reports have independent request
+ownership and retained filters; date-only bounds cover the entire local day;
+deleted history is discoverable after SQLite relaunch; reports and CSV collect
+the selected range under an explicit 10,000-row cap. Native report tables and
+calendar-unit charts replace the earlier partial reporting surface.
+
+Verification: 251 tests pass; strict debug and release warnings-as-errors builds
+pass; diff check passes. Native table/controller tests and rendered screenshots
+were inspected. Packaged VoiceOver, actual OS permission changes, and audible
+smoke testing remain installation acceptance work, not claimed here. Full report:
+task-11-fix-round-2-report.md. Independent review pending.

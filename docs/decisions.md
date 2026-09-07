@@ -443,3 +443,47 @@ plain native table/form visual language.
 streaming repository/export protocol. Recovering history deleted before the current launch
 requires a bounded repository query that includes tombstones. Persisting preferences across
 launches requires a versioned settings store rather than ad-hoc UserDefaults keys.
+
+## 2026-09-07 — Task 11 fix round 2: durable settings and independent queries
+
+**Supersedes:** The Task 11 in-session deleted-history and 200-record report/export
+ruling immediately above. The approved specification requires recovery after
+relaunch and complete totals for the selected range.
+
+**Decision:** Persist one version-1 settings envelope, limited to 16 KiB, before
+publishing preference changes. Load it before composing AppState and system
+controllers. Validate both shortcut components and sound identities; normalize
+numeric preferences. A failed write leaves the previously active preferences
+intact. Hotkey/login updates preserve runtime values on failure and compensate
+their saved candidate; a compensation failure is explicitly surfaced.
+
+**Decision:** History and Reports retain separate filters, loading flags, errors,
+request identities, and results. Latest request wins; Cancel invalidates publication
+and report pagination checks invalidation before every next page. History shows a
+bounded current page (up to 200 rows) and Next page replaces that page. Reports and
+CSV read the full active range up to 10,000 rows / 51 bounded page calls. Over-cap
+requests fail visibly rather than publishing incomplete totals or replacing data.
+CSV failure has its own error and never reloads History. Mutations refresh both
+consumers with their respective active filters.
+
+**Decision:** Date-only Through means the complete selected calendar day. Compute
+the next local midnight with Calendar (23/25-hour DST days included), then bridge
+to the existing inclusive repository API using the immediately preceding
+representable Date. Never subtract a fixed second or millisecond.
+
+**Decision:** Recently Deleted discovers the latest 200 durable history tombstones
+from Core Data. Retention is unlimited by default; finite retention runs at load,
+when changed, and daily, in at most 50 batches of 200. A remaining backlog offers
+Retry retention. Twelve-hour input requires explicit am/pm, while 24-hour mode
+also accepts explicit am/pm. Formats use the same preference across history,
+timer rows, and the status item. Hiding an idle status icon leaves the text
+TopTimer so Settings remain reachable.
+
+**Why:** Separate query ownership prevents cross-window corruption; bounded full
+range aggregation preserves report meaning; durable preferences and tombstones
+make relaunch behavior match the visible controls.
+
+**If the client answers differently:** Larger reports need measured streaming or
+repository aggregation; changing twelve-hour ambiguity needs a parser ruling and
+tests. Longer deleted-history browsing requires a tombstone cursor. A different
+retention policy must explicitly decide whether deleted entries also expire.

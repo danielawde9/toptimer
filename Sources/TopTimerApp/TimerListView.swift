@@ -121,7 +121,7 @@ private struct TimerRow: View {
     case .weekly: recurrence = "Weekly"
     case .selectedWeekdays: recurrence = "Selected days"
     }
-    let end = timer.deadline.map { "Ends \($0.formatted(date: .omitted, time: .shortened))" } ?? ""
+    let end = timer.deadline.map { "Ends \(WallClockDisplay.string($0, uses24HourTime: state.preferences.uses24HourTime))" } ?? ""
     return [end, recurrence].filter { !$0.isEmpty }.joined(separator: " · ")
   }
 }

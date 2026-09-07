@@ -30,7 +30,8 @@ public enum TopTimerWindow: CaseIterable, Hashable, Sendable {
       NSApp.activate(ignoringOtherApps: true)
       return existing
     }
-    let size = kind == .timerList ? NSSize(width: 380, height: 420) : NSSize(width: 700, height: 520)
+    let size =
+      kind == .timerList ? NSSize(width: 380, height: 420) : NSSize(width: 700, height: 520)
     let window = NSWindow(
       contentRect: NSRect(origin: .zero, size: size),
       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered,
@@ -48,8 +49,9 @@ public enum TopTimerWindow: CaseIterable, Hashable, Sendable {
   }
 
   public func closeAll() {
-    for controller in controllers.values { controller.close() }
+    let owned = Array(controllers.values)
     controllers.removeAll()
+    for controller in owned { controller.close() }
   }
 
   public func windowWillClose(_ notification: Notification) {

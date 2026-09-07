@@ -28,10 +28,12 @@ public struct TimerParser: Sendable {
 
     private let calendar: Calendar
     private let now: Date
+    private let uses24HourTime: Bool
 
-    public init(calendar: Calendar = .current, now: Date = .now) {
+    public init(calendar: Calendar = .current, now: Date = .now, uses24HourTime: Bool = true) {
         self.calendar = calendar
         self.now = now
+        self.uses24HourTime = uses24HourTime
     }
 
     public func parse(_ input: String) throws -> ParsedTimer {
@@ -271,6 +273,7 @@ public struct TimerParser: Sendable {
         let isPM = text.hasSuffix("pm")
         let isAM = text.hasSuffix("am")
         let hasMeridiem = isPM || isAM
+        guard uses24HourTime || hasMeridiem else { throw TimerParserError.invalidWallClock }
         let clockText = hasMeridiem ? String(text.dropLast(2)) : text
         let parts = clockText.split(separator: ":", omittingEmptySubsequences: false)
         guard parts.count == 1 || parts.count == 2 else {

@@ -12,6 +12,8 @@ import TopTimerSystem
   private var store: CoreDataStore?
   private var hotKeys: GlobalHotKeyController?
   private let loginItem = LoginItemController()
+  private let settingsStore = TopTimerSettingsStore()
+  private let sleepController = SleepAssertionController()
   private var failureController: StartupFailureController?
   private var closeFailureController: CloseFailureController?
   private var lifecycle = LifecycleCoordinator()
@@ -83,17 +85,24 @@ import TopTimerSystem
     starting = true
     defer { starting = false }
     do {
+      let preferences = try settingsStore.load()
       let folder = try applicationSupportFolder()
       let newStore: CoreDataStore
-      if let existing = store { newStore = existing }
-      else { newStore = try await CoreDataStore.sqlite(at: folder.appendingPathComponent("TopTimer.sqlite")) }
+      if let existing = store {
+        newStore = existing
+      } else {
+        newStore = try await CoreDataStore.sqlite(
+          at: folder.appendingPathComponent("TopTimer.sqlite"))
+      }
       store = newStore
       guard operations.accepting else { return }
       let soundController = AlertSoundController()
       let state = AppState(
         repository: TimerCoreDataRepository(store: newStore),
         notifications: NotificationController(), presets: PresetCoreDataRepository(store: newStore),
-        alertSounds: soundController, operations: operations)
+        alertSounds: soundController, operations: operations,
+        settingsStore: settingsStore, initialPreferences: preferences,
+        sleepController: sleepController)
       await state.load()
       guard operations.accepting else { return }
       let controller = StatusBarController(
@@ -114,14 +123,19 @@ import TopTimerSystem
           }
         })
       try keys.register(
-        Shortcut(keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey)),
+        preferences.quickEntryShortcut
+          ?? Shortcut(keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey)),
         for: .quickEntry)
       try keys.register(
-        Shortcut(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | shiftKey)),
+        preferences.pauseResumeShortcut
+          ?? Shortcut(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | shiftKey)),
         for: .pauseResumePriority)
       guard lifecycle.startResult(.success).contains(.createResources) else { return }
       statusController = controller
       hotKeys = keys
+      if preferences.launchesAtLogin {
+        _ = state.changeLogin(true, apply: { self.setLogin(enabled: $0) })
+      }
       failureController = nil
       refreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak state] _ in
         MainActor.assumeIsolated { state?.perform { await state?.refresh(now: .now) } }
@@ -140,14 +154,22 @@ import TopTimerSystem
     operations.submit { await self.start() }
   }
   private func replaceHotKey(_ shortcut: Shortcut, for slot: HotKeySlot) -> String? {
-    do { try hotKeys?.register(shortcut, for: slot); return nil }
-    catch { return "Could not use that shortcut. The previous shortcut is unchanged." }
+    guard let hotKeys else { return "Shortcuts are unavailable while starting or closing. Try again when ready." }
+    do {
+      try hotKeys.register(shortcut, for: slot)
+      return nil
+    } catch { return "Could not use that shortcut. The previous shortcut is unchanged." }
   }
   private func setLogin(enabled: Bool) -> String? {
-    do { try loginItem.setEnabled(enabled); return nil }
-    catch { return "Could not change launch at login. Open System Settings and try again." }
+    do {
+      try loginItem.setEnabled(enabled)
+      return nil
+    } catch { return "Could not change launch at login. Open System Settings and try again." }
   }
   private func shutdownResources() {
+    do { try sleepController.releaseIfNeeded() } catch {
+      NSLog("TopTimer could not release sleep prevention.")
+    }
     refreshTimer?.invalidate()
     refreshTimer = nil
     do { try hotKeys?.shutdown() } catch {
