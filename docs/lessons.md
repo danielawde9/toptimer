@@ -75,3 +75,19 @@ edit/delete/recover, and export. Startup recovery keeps strict decoding but offe
 safe defaults and a concrete save retry instead of repeating an unchanged error.
 The rendered settings detector checks a 700 by 520 host with simultaneous errors,
 its bounded fitting size, document overflow, and successful scrolling to the end.
+
+## 2026-09-07 — Exercise the production entry boundary
+
+Pure action routing tests cannot prove that macOS has a retained delegate, nor
+can a selected editor ID prove that the current window hosts a sheet. Trace
+backward from the durable transition to the actual OS callback or rendered
+control. Do not derive a resume target from a running-only priority query.
+
+Executable detectors: NotificationDeliveryTests tests weak-center registration,
+application retention/shutdown, the production delegate's request boundary,
+malformed identity rejection, Repeat/Snooze/Stop, and closed-owner refusal.
+FinalIntegrationTests tests real Core Data acknowledgement/cancellation/history
+and deterministic shortcut target handling. TimerListHostTests opens the actual
+native Actions menu, invokes Finish/Edit, verifies history/report/CSV results,
+and hosts/dismisses sheets in both list contexts. Editor actions use a visible
+footer because a toolbar modifier alone does not prove reachable sheet controls.

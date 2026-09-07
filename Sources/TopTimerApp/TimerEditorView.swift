@@ -167,7 +167,13 @@ public struct TimerEditorView: View {
       }
     }.padding().frame(width: 360)
       .onChange(of: draft) { _ in error = nil }
-      .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Save", action: submit) } }
+      .safeAreaInset(edge: .bottom) {
+        HStack {
+          Spacer()
+          Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+          Button("Save", action: submit).keyboardShortcut(.defaultAction)
+        }.padding()
+      }
   }
   private var soundError: String? {
     draft.alertName.map { catalog.names.contains($0) ? nil : "Choose an available alert sound." }
@@ -213,18 +219,23 @@ public struct TimerEditorView: View {
     }
   }
   private func submit() {
-    guard operations.submit({
-      do {
-        let configuration = try draft.configuration(catalog: catalog)
-        guard await save(configuration) else {
-          error = "Could not save timer."
-          return
+    guard
+      operations.submit({
+        do {
+          let configuration = try draft.configuration(catalog: catalog)
+          guard await save(configuration) else {
+            error = "Could not save timer."
+            return
+          }
+          dismiss()
+        } catch let EditorDraftError.invalid(message) { error = message } catch {
+          self.error = "Invalid timer configuration."
         }
-        dismiss()
-      } catch let EditorDraftError.invalid(message) { error = message } catch {
-        self.error = "Invalid timer configuration."
-      }
-    }) else { error = "Cannot save while closing or busy."; return }
+      })
+    else {
+      error = "Cannot save while closing or busy."
+      return
+    }
   }
 }
 

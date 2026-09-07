@@ -3,6 +3,7 @@ import AppKit
 import Foundation
 import TopTimerPersistence
 import TopTimerSystem
+import UserNotifications
 
 @MainActor public final class TopTimerApplication: NSObject, NSApplicationDelegate {
   private let operations = AppOperationOwner()
@@ -19,6 +20,15 @@ import TopTimerSystem
   private var lifecycle = LifecycleCoordinator()
   private var terminationTask: Task<Void, Never>?
   private var closingStore: CoreDataStore?
+  private var notificationDelegate: TimerNotificationDelegate?
+  private var notificationCenter: (any NotificationDelegateRegistering)?
+  func installNotificationResponses(state: AppState, center: any NotificationDelegateRegistering) {
+    notificationCenter?.delegate = nil
+    let delegate = TimerNotificationDelegate(state: state)
+    notificationDelegate = delegate
+    notificationCenter = center
+    center.delegate = delegate
+  }
   private weak var terminationSender: NSApplication?
   public func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
@@ -107,6 +117,7 @@ import TopTimerSystem
         sleepController: sleepController)
       await state.load()
       guard operations.accepting else { return }
+      installNotificationResponses(state: state, center: UNUserNotificationCenter.current())
       let controller = StatusBarController(
         state: state,
         updateHotKey: { [weak self] slot, shortcut in self?.replaceHotKey(shortcut, for: slot) },
@@ -115,14 +126,8 @@ import TopTimerSystem
       let keys = GlobalHotKeyController(
         quickEntry: { [weak controller] in controller?.openFromShortcut() },
         pauseResumePriority: { [weak state] in
-          guard let state, let timer = state.priorityTimer else { return }
-          state.perform {
-            if timer.state == .running {
-              _ = await state.pause(timer.id)
-            } else {
-              _ = await state.resume(timer.id)
-            }
-          }
+          guard let state else { return }
+          state.perform { await state.togglePriorityTimer() }
         })
       try keys.register(
         preferences.quickEntryShortcut
@@ -171,6 +176,9 @@ import TopTimerSystem
     } catch { return "Could not change launch at login. Open System Settings and try again." }
   }
   private func shutdownResources() {
+    notificationCenter?.delegate = nil
+    notificationCenter = nil
+    notificationDelegate = nil
     do { try sleepController.releaseIfNeeded() } catch {
       NSLog("TopTimer could not release sleep prevention.")
     }

@@ -75,8 +75,8 @@ import TopTimerSystem
   }
   private func openTimerList() {
     windows.show(kind: .timerList) {
-      TimerListView(
-        state: self.state, openHistory: { [weak self] in self?.openHistory() },
+      TimerListHost(
+        state: self.state, sounds: self.sounds, openHistory: { [weak self] in self?.openHistory() },
         openReports: { [weak self] in self?.openReports() })
     }
   }
@@ -142,7 +142,7 @@ struct SettingsWindowRoot: View {
     }
   }
 }
-private struct PopoverRoot: View {
+struct PopoverRoot: View {
   @ObservedObject var state: AppState
   @ObservedObject var sounds: SoundCatalogState
   @State var showingList: Bool
@@ -157,12 +157,36 @@ private struct PopoverRoot: View {
         openSettings: openSettings, openTimerList: openTimerList)
       if showingList {
         Divider()
-        TimerListView(state: state)
+        TimerListHost(state: state, sounds: sounds)
       }
-    }.onChange(of: showingList) { value in onListChange(value) }.sheet(
+    }.onChange(of: showingList) { value in onListChange(value) }
+  }
+}
+
+struct TimerListHost: View {
+  @ObservedObject var state: AppState
+  @ObservedObject var sounds: SoundCatalogState
+  @State private var ownsEditor = false
+  var openHistory: (() -> Void)? = nil
+  var openReports: (() -> Void)? = nil
+  var body: some View {
+    TimerListView(
+      state: state, openHistory: openHistory, openReports: openReports,
+      editTimer: { id in
+        state.perform {
+          await state.selectEditor(id)
+          ownsEditor = state.selectedEditorTimer != nil
+        }
+      }
+    ).sheet(
       isPresented: Binding(
-        get: { state.selectedEditorTimer != nil },
-        set: { if !$0 { state.perform { await state.selectEditor(nil) } } })
+        get: { ownsEditor && state.selectedEditorTimer != nil },
+        set: {
+          if !$0 {
+            ownsEditor = false
+            state.perform { await state.selectEditor(nil) }
+          }
+        })
     ) {
       if let timer = state.selectedEditorTimer {
         EditorSheet(timer: timer, state: state, sounds: sounds)

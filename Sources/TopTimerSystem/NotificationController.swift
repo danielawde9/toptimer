@@ -135,6 +135,15 @@ public struct NotificationController: Sendable {
     actionIdentifier: String, categoryIdentifier: String, requestIdentifier: String,
     savedDuration: TimeInterval?, snoozePreference: TimeInterval
   ) -> TimerNotificationAction {
+    Self.routeAction(
+      actionIdentifier: actionIdentifier, categoryIdentifier: categoryIdentifier,
+      requestIdentifier: requestIdentifier, savedDuration: savedDuration,
+      snoozePreference: snoozePreference)
+  }
+  public static func routeAction(
+    actionIdentifier: String, categoryIdentifier: String, requestIdentifier: String,
+    savedDuration: TimeInterval?, snoozePreference: TimeInterval
+  ) -> TimerNotificationAction {
     guard categoryIdentifier == Self.categoryIdentifier,
       let id = Self.timerID(from: requestIdentifier)
     else { return .invalidPayload }
@@ -223,6 +232,11 @@ public actor UNNotificationCenterAdapter: NotificationCenterClient {
     content.title = request.title
     content.body = request.body
     content.categoryIdentifier = request.categoryIdentifier
+    if request.identifier.hasPrefix("timer-"),
+      let id = UUID(uuidString: String(request.identifier.dropFirst(6)))
+    {
+      content.userInfo = ["version": 1, "timerID": id.uuidString]
+    }
     content.sound =
       preparedSoundName.map { UNNotificationSound(named: UNNotificationSoundName($0)) } ?? .default
     return content

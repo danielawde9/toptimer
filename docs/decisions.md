@@ -548,3 +548,33 @@ reachable even when messages exceed the current window height.
 recovery would require a bounded quarantine policy instead of reset. Automatic
 filter application would replace the explicit Apply workflow and need input
 debouncing and its own query-admission tests.
+
+## 2026-09-07 — Final integration: production entry points
+
+**Decision:** The app retains its notification delegate until shutdown. Requests
+carry a versioned timer UUID identity; category, request identity, payload, and
+action must agree before bounded operation admission. Repeat duration and Snooze
+preference are read from authoritative state, never trusted from notification
+payloads. Foreground banners remain visible; foreground sound is owned by the
+existing completion sound controller to avoid playing twice.
+
+**Decision:** Notification Stop acknowledges completed occurrences and cancels
+running or paused occurrences with durable cancelled history. The Timer List
+offers Finish for stopwatches through AppState.complete and Stop for countdowns
+through AppState.cancel. Delete remains a separate recovery operation. Countdown
+completion retains its domain invariant that a running countdown must be due.
+
+**Decision:** The global pause/resume command remembers one timer that it paused
+and resumes it before selecting another running priority. Deleted or completed
+targets are discarded. Both list locations use the same editor sheet host, with
+visible Save/Cancel controls and the existing bounded operation owner.
+
+**Why:** Isolated controllers did not prove production reachability. The same
+user action must cross the retained adapter, durable transition, and visible
+presentation boundary in the installed application.
+
+**If the client answers differently:** Stopping an early countdown as a finished
+occurrence would require an explicit domain/history reason decision. Choosing a
+different running timer on the second shortcut invocation would remove the
+predictable pause/resume pair. Older unversioned notifications are ignored and
+are replaced when the timer is next scheduled.

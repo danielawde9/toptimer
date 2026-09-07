@@ -12,11 +12,16 @@ public struct TimerListView: View {
   @State private var recentlyDeleted = false
   private let openHistory: (() -> Void)?
   private let openReports: (() -> Void)?
-  public init(state: AppState, recentlyDeleted: Bool = false, openHistory: (() -> Void)? = nil, openReports: (() -> Void)? = nil) {
+  private let editTimer: ((UUID) -> Void)?
+  public init(
+    state: AppState, recentlyDeleted: Bool = false, openHistory: (() -> Void)? = nil,
+    openReports: (() -> Void)? = nil, editTimer: ((UUID) -> Void)? = nil
+  ) {
     self.state = state
     _recentlyDeleted = State(initialValue: recentlyDeleted)
     self.openHistory = openHistory
     self.openReports = openReports
+    self.editTimer = editTimer
   }
   public var body: some View {
     VStack(spacing: 0) {
@@ -25,7 +30,11 @@ public struct TimerListView: View {
         Text("Recently Deleted").tag(true)
       }.pickerStyle(.segmented).labelsHidden().padding(8)
       if openHistory != nil || openReports != nil {
-        HStack { Button("History", systemImage: "clock.arrow.circlepath") { openHistory?() }; Button("Reports", systemImage: "chart.bar") { openReports?() }; Spacer() }.padding(.horizontal, 8)
+        HStack {
+          Button("History", systemImage: "clock.arrow.circlepath") { openHistory?() }
+          Button("Reports", systemImage: "chart.bar") { openReports?() }
+          Spacer()
+        }.padding(.horizontal, 8)
       }
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {
@@ -49,7 +58,7 @@ public struct TimerListView: View {
               Text("No active timers").foregroundStyle(.secondary).padding()
             }
             ForEach(state.activeTimers.prefix(100), id: \.id) { timer in
-              TimerRow(timer: timer, state: state)
+              TimerRow(timer: timer, state: state, editTimer: editTimer)
               Divider()
             }
           }
@@ -62,6 +71,7 @@ public struct TimerListView: View {
 private struct TimerRow: View {
   let timer: TimerItem
   @ObservedObject var state: AppState
+  let editTimer: ((UUID) -> Void)?
   @State private var hovered = false
   @FocusState private var focused: Bool
   var body: some View {
@@ -100,12 +110,33 @@ private struct TimerRow: View {
     }
   }
   @ViewBuilder private var actions: some View {
-    Button("Edit") { state.perform { await state.selectEditor(timer.id) } }
+    Button("Edit") {
+      if let editTimer {
+        editTimer(timer.id)
+      } else {
+        state.perform { await state.selectEditor(timer.id) }
+      }
+    }
     Button("Duplicate") { state.perform { _ = await state.duplicate(timer.id) } }
     Button("Restart") { state.perform { _ = await state.restart(timer.id) } }
-    if timer.state == .running { Button("Pause") { state.perform { _ = await state.pause(timer.id) } } }
-    if timer.state == .paused { Button("Resume") { state.perform { _ = await state.resume(timer.id) } } }
-    if timer.state == .idle { Button("Start") { state.perform { _ = await state.start(timer.id) } } }
+    if timer.state == .running {
+      Button("Pause") { state.perform { _ = await state.pause(timer.id) } }
+    }
+    if timer.state == .paused {
+      Button("Resume") { state.perform { _ = await state.resume(timer.id) } }
+    }
+    if timer.state == .running || timer.state == .paused {
+      if timer.kind == .stopwatch {
+        Button("Finish") { state.perform { _ = await state.complete(timer.id) } }
+          .help("Finish stopwatch and save history")
+      } else {
+        Button("Stop") { state.perform { _ = await state.cancel(timer.id) } }
+          .help("Stop countdown and save history")
+      }
+    }
+    if timer.state == .idle {
+      Button("Start") { state.perform { _ = await state.start(timer.id) } }
+    }
     if timer.state == .completed {
       Button("Acknowledge") { state.perform { _ = await state.acknowledge(timer.id) } }
     }
@@ -121,7 +152,10 @@ private struct TimerRow: View {
     case .weekly: recurrence = "Weekly"
     case .selectedWeekdays: recurrence = "Selected days"
     }
-    let end = timer.deadline.map { "Ends \(WallClockDisplay.string($0, uses24HourTime: state.preferences.uses24HourTime))" } ?? ""
+    let end =
+      timer.deadline.map {
+        "Ends \(WallClockDisplay.string($0, uses24HourTime: state.preferences.uses24HourTime))"
+      } ?? ""
     return [end, recurrence].filter { !$0.isEmpty }.joined(separator: " · ")
   }
 }

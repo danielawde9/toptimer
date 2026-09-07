@@ -101,6 +101,8 @@ public final class AppState: ObservableObject {
   private let sleepController: SleepAssertionController?
   private var lastRetentionDay: Date?
   private var refreshing = false
+  private var shortcutPausedTimerID: UUID?
+  private var togglingPriority = false
 
   private let repository: any TimerRepository
   private let notifications: any TimerNotificationScheduling
@@ -494,6 +496,27 @@ public final class AppState: ObservableObject {
     selectedEditorTimer = try? await repository.timer(id: id)
   }
 
+  public func togglePriorityTimer() async {
+    guard !togglingPriority else { return }
+    togglingPriority = true
+    defer { togglingPriority = false }
+    do {
+      if let id = shortcutPausedTimerID {
+        let timer = try await repository.timer(id: id)
+        if timer.deletedAt == nil && timer.state == .paused {
+          if await resume(id) { shortcutPausedTimerID = nil }
+          return
+        }
+        shortcutPausedTimerID = nil
+      }
+      guard let timer = try await repository.priority(at: now()) else { return }
+      if await pause(timer.id) { shortcutPausedTimerID = timer.id }
+    } catch {
+      shortcutPausedTimerID = nil
+      inlineError = "Could not pause or resume the priority timer. Try again."
+    }
+  }
+
   @discardableResult public func pause(_ id: UUID) async -> Bool {
     await transition(
       id, failure: "Could not pause timer.", mutation: { try $0.pause(at: self.now()) },
@@ -628,11 +651,36 @@ public final class AppState: ObservableObject {
   /// this boundary is called; invalid values intentionally have no effects.
   public func handle(notificationAction action: TimerNotificationAction) async {
     switch action {
-    case .stop(let id): await cancel(id)
+    case .stop(let id): await stopNotificationTimer(id)
     case .repeatTimer(let id, _): await repeatActionTimer(from: id)
     case .snooze(let id, _): await createActionTimer(from: id, duration: preferences.snoozeSeconds)
     case .invalidPayload: return
     }
+  }
+
+  func handleNotificationResponse(timerID: UUID, actionIdentifier: String) async {
+    do {
+      let timer = try await repository.timer(id: timerID)
+      guard timer.deletedAt == nil else { return }
+      let action = NotificationController.routeAction(
+        actionIdentifier: actionIdentifier,
+        categoryIdentifier: NotificationController.categoryIdentifier,
+        requestIdentifier: NotificationController.identifier(for: timerID),
+        savedDuration: timer.duration, snoozePreference: preferences.snoozeSeconds)
+      await handle(notificationAction: action)
+    } catch { inlineError = "Could not read timer for notification action. Try again." }
+  }
+
+  private func stopNotificationTimer(_ id: UUID) async {
+    do {
+      let timer = try await repository.timer(id: id)
+      guard timer.deletedAt == nil else { return }
+      switch timer.state {
+      case .completed: _ = await acknowledge(id)
+      case .running, .paused: _ = await cancel(id)
+      default: return
+      }
+    } catch { inlineError = "Could not stop timer from notification. Try again." }
   }
 
   private func createActionTimer(from id: UUID, duration: TimeInterval) async {
