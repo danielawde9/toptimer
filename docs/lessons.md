@@ -91,3 +91,12 @@ and deterministic shortcut target handling. TimerListHostTests opens the actual
 native Actions menu, invokes Finish/Edit, verifies history/report/CSV results,
 and hosts/dismisses sheets in both list contexts. Editor actions use a visible
 footer because a toolbar modifier alone does not prove reachable sheet controls.
+
+## 2026-09-07 — Test native field-editor insertion as well as reducers
+
+An NSTextField command override does not prove editing keyboard delivery. Exercise
+the NSControl delegate callback and a mounted field editor's actual insertText
+path. Real marked text should be created with setMarkedText; a fake overriding
+only markedRange does not model hasMarkedText. Regression detectors are
+QuickEntryNativeRoutingTests: native Return/Escape delivery, no implicit suggestion
+replacement, Space insertion versus pause, and focus retention across updates.

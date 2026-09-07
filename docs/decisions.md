@@ -578,3 +578,36 @@ occurrence would require an explicit domain/history reason decision. Choosing a
 different running timer on the second shortcut invocation would remove the
 predictable pause/resume pair. Older unversioned notifications are ignored and
 are replaced when the timer is next scheduled.
+
+## 2026-09-07 — Native quick-entry input and selection
+
+**Decision:** Suggestions start unselected. Return executes the typed entry (or
+blank stopwatch) unless the user deliberately navigates to a suggestion. Space
+uses the same remembered pause/resume target as the global shortcut, only for
+blank or fully selected entry text. A control-owned native field editor preserves
+normal insertion and IME composition. Initial focus is requested once per opening,
+so subsequent refreshes do not steal focus from another control.
+
+**Why:** AppKit sends editing commands through its field-editor delegate, not
+the NSTextField override used by the previous implementation. Space is text
+insertion rather than an insertSpace command. Automatically selecting the first
+suggestion also contradicted blank Return starting a stopwatch.
+
+**If changed:** Automatic suggestion selection would need a separate explicit
+acceptance key so Return and the visible Run control keep equivalent behavior.
+
+## 2026-09-07 — Popover presentation owns a compact content contract
+
+**Decision:** The status-bar popover explicitly owns a 276 by 110 content size,
+and its hosting controller receives the same preferred size and initial frame.
+The Quick Entry root is framed to that surface rather than relying on AppKit to
+infer a height from a SwiftUI representable control.
+
+**Why:** The installed app could show the popover chrome with an empty,
+oversized body because the original hosting controller reported a zero-size
+surface. An explicit cross-framework layout contract keeps the panel compact
+and ensures its native text field and toolbar have drawable bounds.
+
+**If changed:** A dynamic popover height needs a measured content-size update
+whenever suggestions or inline timer rows appear, plus regression coverage for
+every expansion and contraction transition.

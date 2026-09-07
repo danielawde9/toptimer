@@ -150,16 +150,13 @@ actor CompletionPlayerSpy: SoundPlayer {
 
 @MainActor private final class CompositionField: NSTextField {
   var composition = false
-  private let editor = CompositionEditor()
+  private let editor = NSTextView()
   override func currentEditor() -> NSText? {
-    editor.composition = composition
+    if composition {
+      editor.setMarkedText("a", selectedRange: NSRange(location: 1, length: 0),
+        replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+    } else { editor.unmarkText() }
     return editor
-  }
-}
-@MainActor private final class CompositionEditor: NSTextView {
-  var composition = false
-  override func markedRange() -> NSRange {
-    NSRange(location: composition ? 0 : NSNotFound, length: composition ? 1 : 0)
   }
 }
 

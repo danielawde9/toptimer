@@ -5,6 +5,7 @@ import TopTimerDomain
 import TopTimerSystem
 
 @MainActor public final class StatusBarController: NSObject, NSPopoverDelegate {
+  private static let quickEntryPopoverSize = NSSize(width: 276, height: 110)
   private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
   private let sounds = SoundCatalogState()
   private let popover = NSPopover()
@@ -16,6 +17,7 @@ import TopTimerSystem
   private var subscriptions = Set<AnyCancellable>()
   private var showingList = false
   private var shortcutOrigin: NSRunningApplication?
+  var popoverForTesting: NSPopover { popover }
   public init(
     state: AppState, updateHotKey: @escaping (HotKeySlot, Shortcut) -> String? = { _, _ in nil },
     updateLogin: @escaping (Bool) -> String? = { _ in nil },
@@ -55,8 +57,15 @@ import TopTimerSystem
         onListChange: { [weak self] value in self?.showingList = value },
         closePopover: { [weak self] in self?.close() },
         openSettings: { [weak self] in self?.openSettings() },
-        openTimerList: { [weak self] in self?.openTimerList() }))
-    popover.contentViewController = NSHostingController(rootView: root)
+        openTimerList: { [weak self] in self?.openTimerList() })
+      .frame(
+        width: Self.quickEntryPopoverSize.width, height: Self.quickEntryPopoverSize.height,
+        alignment: .topLeading))
+    let host = NSHostingController(rootView: root)
+    host.preferredContentSize = Self.quickEntryPopoverSize
+    host.view.frame = NSRect(origin: .zero, size: Self.quickEntryPopoverSize)
+    popover.contentSize = Self.quickEntryPopoverSize
+    popover.contentViewController = host
     guard let button = item.button else { return }
     popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     NSApp.activate(ignoringOtherApps: true)

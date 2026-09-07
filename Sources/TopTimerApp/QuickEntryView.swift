@@ -4,7 +4,7 @@ import SwiftUI
 public struct QuickEntryView: View {
   @ObservedObject var state: AppState
   @State private var focused = false
-  @State private var selectedSuggestion = 0
+  @State private var selectedSuggestion = -1
   @Binding var showingList: Bool
   let closePopover: () -> Void
   let openSettings: (() -> Void)?
@@ -57,7 +57,7 @@ public struct QuickEntryView: View {
         }.help("Quit TopTimer").accessibilityLabel("Quit TopTimer")
       }.buttonStyle(.borderless).padding(8)
     }.frame(width: 260).onAppear { focused = true }.onChange(of: state.quickEntryText) { text in
-      selectedSuggestion = 0
+      selectedSuggestion = -1
       state.perform { await state.refreshSuggestions(query: text) }
     }
   }
@@ -71,7 +71,7 @@ public struct QuickEntryView: View {
     case .run: run()
     case .clear:
       state.quickEntryText = ""
-      selectedSuggestion = 0
+      selectedSuggestion = -1
     case .close: closePopover()
     case .togglePriority: togglePriority()
     case .passThrough, .selectSuggestion: break
@@ -80,14 +80,7 @@ public struct QuickEntryView: View {
   /// Selecting a suggestion and pressing Return runs it immediately, exactly like clicking Run.
   private func run() { let command = state.quickEntryText; state.perform { await state.create(command: command) } }
   private func togglePriority() {
-    guard let timer = state.priorityTimer else { return }
-    state.perform {
-      if timer.state == .running {
-        _ = await state.pause(timer.id)
-      } else {
-        _ = await state.resume(timer.id)
-      }
-    }
+    state.perform { await state.togglePriorityTimer() }
   }
   @ViewBuilder private var suggestions: some View {
     if focused && !state.suggestions.isEmpty {

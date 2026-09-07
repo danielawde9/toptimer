@@ -47,7 +47,8 @@ public enum QuickEntryCommandReducer {
     case .return:
       return .init(
         suggestionIndex: state.suggestionIndex,
-        effect: .run(selectedSuggestion: state.suggestionCount > 0))
+        effect: .run(selectedSuggestion: state.suggestionIndex >= 0
+          && state.suggestionIndex < state.suggestionCount))
     case .escape: return .init(suggestionIndex: 0, effect: state.text.isEmpty ? .close : .clear)
     case .space:
       return .init(
