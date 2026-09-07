@@ -123,19 +123,19 @@ private struct AnyCodingKey: CodingKey {
 }
 
 public actor PresetCoreDataRepository: PresetRepository {
-    private static let maximumActivePresets = 10_000
-    private static let scanLimit = maximumActivePresets + 1
+    private static let defaultMaximumActivePresets = 10_000
     private let store: CoreDataStore
-    public init(store: CoreDataStore) { self.store = store }
+    private let maximumActivePresets: Int
+    public init(store: CoreDataStore, maximumActivePresets: Int = 10_000) { self.store = store; self.maximumActivePresets = max(1, maximumActivePresets) }
 
     public func record(command: String, tags: [String], at date: Date) async throws -> TimerPreset {
         let candidate = try TimerPreset(command: command, tags: tags, createdAt: date, lastUsed: date)
+        let maximum = maximumActivePresets
         return try await store.perform { context in
             do {
-                let records = try Self.fetch(context)
-                let decoded = try records.map { try PresetPayloadCodec.decode($0.payload) }
-                let activeCount = decoded.filter { $0.deletedAt == nil }.count
-                guard activeCount <= Self.maximumActivePresets else { throw TimerRepositoryError.presetCapacityReached }
+                let records = try Self.fetch(context, predicate: NSPredicate(format: "deletedAt == nil"), limit: maximum + 1)
+                guard records.count <= maximum else { throw TimerRepositoryError.presetCapacityReached }
+                let activeCount = records.count
                 if let record = try records.first(where: { record in
                     let preset = try PresetPayloadCodec.decode(record.payload)
                     return preset.commandKey == candidate.commandKey && preset.tags == candidate.tags
@@ -146,7 +146,7 @@ public actor PresetCoreDataRepository: PresetRepository {
                     record.createdAt = updated.createdAt; record.deletedAt = nil; record.payload = try PresetPayloadCodec.encode(updated)
                     try context.save(); return updated
                 }
-                guard activeCount < Self.maximumActivePresets else { throw TimerRepositoryError.presetCapacityReached }
+                guard activeCount < maximum else { throw TimerRepositoryError.presetCapacityReached }
                 let record = PresetRecord(context: context)
                 record.id = candidate.id; record.createdAt = candidate.createdAt; record.deletedAt = nil; record.payload = try PresetPayloadCodec.encode(candidate)
                 try context.save(); return candidate
@@ -158,9 +158,11 @@ public actor PresetCoreDataRepository: PresetRepository {
         guard query.count <= 2_048 else { throw TimerRepositoryError.invalidPresetQuery }
         let cap = min(20, max(1, limit)); let tokens = TimerPreset.normalizedTags(query.split(whereSeparator: { $0.isWhitespace }).map(String.init))
         guard tokens.count <= 12 else { throw TimerRepositoryError.invalidPresetQuery }
+        let maximum = maximumActivePresets
         return try await store.perform { context in
-            let values = try Self.fetch(context).compactMap { record -> TimerPreset? in let preset = try PresetPayloadCodec.decode(record.payload); return preset.deletedAt == nil ? preset : nil }
-            guard values.count <= Self.maximumActivePresets else { throw TimerRepositoryError.presetCapacityReached }
+            let records = try Self.fetch(context, predicate: NSPredicate(format: "deletedAt == nil"), limit: maximum + 1)
+            guard records.count <= maximum else { throw TimerRepositoryError.presetCapacityReached }
+            let values = try records.map { try PresetPayloadCodec.decode($0.payload) }
             return values.sorted { left, right in
                 let lMatch = tokens.contains { token in left.tags.contains { $0.hasPrefix(token) } }
                 let rMatch = tokens.contains { token in right.tags.contains { $0.hasPrefix(token) } }
@@ -176,9 +178,10 @@ public actor PresetCoreDataRepository: PresetRepository {
     public func softDeletePreset(_ id: UUID, at date: Date) async throws { try await setDeleted(id, date) }
     public func recoverPreset(_ id: UUID) async throws { try await setDeleted(id, nil) }
     private func setDeleted(_ id: UUID, _ date: Date?) async throws {
+        let maximum = maximumActivePresets
         try await store.perform { context in
-            do { guard let record = try Self.fetch(context).first(where: { $0.id == id }) else { throw TimerRepositoryError.timerNotFound }; let old = try PresetPayloadCodec.decode(record.payload); if old.deletedAt != nil && date != nil { return }; if old.deletedAt == nil && date == nil { return }; let updated = try TimerPreset(id: old.id, command: old.command, tags: old.tags, useCount: old.useCount, createdAt: old.createdAt, lastUsed: old.lastUsed, deletedAt: date); record.deletedAt = date; record.payload = try PresetPayloadCodec.encode(updated); try context.save() } catch { context.rollback(); throw error }
+            do { guard let record = try Self.fetch(context, predicate: NSPredicate(format: "id == %@", id as NSUUID), limit: 1).first else { throw TimerRepositoryError.timerNotFound }; let old = try PresetPayloadCodec.decode(record.payload); if old.deletedAt != nil && date != nil { return }; if old.deletedAt == nil && date == nil { return }; if date == nil { let active = try Self.fetch(context, predicate: NSPredicate(format: "deletedAt == nil"), limit: maximum + 1); guard active.count < maximum else { throw TimerRepositoryError.presetCapacityReached } }; let updated = try TimerPreset(id: old.id, command: old.command, tags: old.tags, useCount: old.useCount, createdAt: old.createdAt, lastUsed: old.lastUsed, deletedAt: date); record.deletedAt = date; record.payload = try PresetPayloadCodec.encode(updated); try context.save() } catch { context.rollback(); throw error }
         }
     }
-    private static func fetch(_ context: NSManagedObjectContext) throws -> [PresetRecord] { let request = NSFetchRequest<PresetRecord>(entityName: "PresetRecord"); request.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: true), NSSortDescriptor(key: "id", ascending: true)]; request.fetchLimit = scanLimit; return try context.fetch(request) }
+    private static func fetch(_ context: NSManagedObjectContext, predicate: NSPredicate, limit: Int) throws -> [PresetRecord] { let request = NSFetchRequest<PresetRecord>(entityName: "PresetRecord"); request.predicate = predicate; request.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: true), NSSortDescriptor(key: "id", ascending: true)]; request.fetchLimit = limit; return try context.fetch(request) }
 }
