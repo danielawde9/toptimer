@@ -41,7 +41,7 @@ final class AppStateTests: XCTestCase {
 
         let repositoryOperations = await repository.recordedOperations()
         let notificationOperations = await notifications.recordedOperations()
-        XCTAssertEqual(repositoryOperations, ["insert"])
+        XCTAssertEqual(repositoryOperations, ["insert", "publish"])
         XCTAssertEqual(notificationOperations, [])
         XCTAssertEqual(state.activeTimers.count, 1)
         XCTAssertEqual(state.activeTimers[0].kind, .stopwatch)
@@ -77,6 +77,161 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(presetCount, 0)
     }
 
+    func testCountdownCreationPersistsSchedulesThenPublishes() async {
+        let repository = RecordingRepository()
+        let notifications = RecordingNotifications()
+        let state = AppState(repository: repository, notifications: notifications, now: { Date(timeIntervalSince1970: 1_000) })
+
+        await state.create(command: "5m Focus")
+
+        let repositoryOperations = await repository.recordedOperations()
+        let notificationOperations = await notifications.recordedOperations()
+        XCTAssertEqual(repositoryOperations, ["insert", "publish"])
+        XCTAssertEqual(notificationOperations, ["schedule"])
+        XCTAssertEqual(state.activeTimers.map(\.title), ["Focus"])
+    }
+
+    func testCreationStillPublishesPersistedTimerWhenSchedulingFails() async {
+        let repository = RecordingRepository()
+        let notifications = RecordingNotifications(failSchedule: true)
+        let state = AppState(repository: repository, notifications: notifications, now: { Date(timeIntervalSince1970: 1_000) })
+
+        await state.create(command: "5m Focus")
+
+        let repositoryOperations = await repository.recordedOperations()
+        let notificationOperations = await notifications.recordedOperations()
+        XCTAssertEqual(repositoryOperations, ["insert", "publish"])
+        XCTAssertEqual(notificationOperations, ["schedule"])
+        XCTAssertEqual(state.activeTimers.count, 1)
+        XCTAssertEqual(state.inlineError, "Timer saved, but notification scheduling failed.")
+    }
+
+    func testFailedTransitionLeavesPublishedTimersAndNotificationsUntouched() async throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let timer = try runningCountdown(at: now)
+        let cases: [(String, (AppState, UUID) async -> Bool)] = [
+            ("update", { await $0.pause($1) }),
+            ("cancel", { await $0.cancel($1) }),
+            ("softDelete", { await $0.softDelete($1) }),
+            ("complete", { await $0.complete($1) })
+        ]
+        for (operation, transition) in cases {
+            let repository = RecordingRepository(failing: [operation])
+            await repository.seed(timer)
+            let notifications = RecordingNotifications()
+            let state = AppState(repository: repository, notifications: notifications, now: { now })
+            await state.load()
+            let before = state.activeTimers
+            await repository.resetOperations()
+
+            let succeeded = await transition(state, timer.id)
+            let notificationOperations = await notifications.recordedOperations()
+            let repositoryOperations = await repository.recordedOperations()
+            XCTAssertFalse(succeeded, operation)
+            XCTAssertEqual(state.activeTimers, before, operation)
+            XCTAssertEqual(notificationOperations, [], operation)
+            XCTAssertFalse(repositoryOperations.contains("publish"), operation)
+        }
+    }
+
+    func testSuccessfulTransitionsPersistApplyNotificationEffectThenPublish() async throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let cases: [(String, Date, () throws -> TimerItem, String, (AppState, UUID) async -> Bool, String)] = [
+            ("pause", now, { try self.runningCountdown(at: now) }, "update", { await $0.pause($1) }, "cancel"),
+            ("start", now, { try self.idleCountdown(at: now) }, "update", { await $0.start($1) }, "schedule"),
+            ("edit", now, { try self.runningCountdown(at: now) }, "update", { await $0.edit($1, title: "Edited", details: "Details", tags: ["work"]) }, "cancel"),
+            ("resume", now, { try self.pausedCountdown(at: now) }, "update", { await $0.resume($1) }, "schedule"),
+            ("restart", now, { try self.runningCountdown(at: now) }, "update", { await $0.restart($1) }, "schedule"),
+            ("acknowledge", now.addingTimeInterval(300), { try self.completedCountdown(at: now) }, "update", { await $0.acknowledge($1) }, "cancel"),
+            ("cancel", now, { try self.runningCountdown(at: now) }, "cancel", { await $0.cancel($1) }, "cancel"),
+            ("softDelete", now, { try self.runningCountdown(at: now) }, "softDelete", { await $0.softDelete($1) }, "cancel"),
+            ("complete", now.addingTimeInterval(300), { try self.runningCountdown(at: now) }, "complete", { await $0.complete($1) }, "")
+        ]
+        for (_, transitionDate, makeTimer, operation, transition, notification) in cases {
+            let repository = RecordingRepository()
+            let timer = try makeTimer()
+            await repository.seed(timer)
+            let notifications = RecordingNotifications()
+            let state = AppState(repository: repository, notifications: notifications, now: { transitionDate })
+            await repository.resetOperations()
+
+            let succeeded = await transition(state, timer.id)
+            let repositoryOperations = await repository.recordedOperations()
+            let notificationOperations = await notifications.recordedOperations()
+            XCTAssertTrue(succeeded)
+            let expected = ["cancel", "softDelete", "complete"].contains(operation) ? [operation, "publish"] : ["timer", operation, "publish"]
+            XCTAssertEqual(repositoryOperations, expected)
+            let expectedNotifications = operation == "update" && notification == "cancel" && !state.activeTimers.isEmpty && state.activeTimers[0].kind == .countdown && state.activeTimers[0].state == .running ? ["cancel", "schedule"] : (notification.isEmpty ? [] : [notification])
+            XCTAssertEqual(notificationOperations, expectedNotifications)
+        }
+    }
+
+    private func runningCountdown(at date: Date) throws -> TimerItem {
+        var timer = try TimerItem.countdown(title: "Focus", duration: 300, createdAt: date)
+        try timer.start(at: date)
+        return timer
+    }
+
+    private func pausedCountdown(at date: Date) throws -> TimerItem {
+        var timer = try runningCountdown(at: date)
+        try timer.pause(at: date)
+        return timer
+    }
+
+    private func idleCountdown(at date: Date) throws -> TimerItem {
+        try TimerItem.countdown(title: "Focus", duration: 300, createdAt: date)
+    }
+
+    private func completedCountdown(at date: Date) throws -> TimerItem {
+        let timer = try runningCountdown(at: date)
+        return try RecurrenceService().complete(timer, at: date.addingTimeInterval(300)).completed
+    }
+
+    func testNotificationRepeatUsesOriginalFieldsAndDurationButDropsRecurrence() async throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        var source = try TimerItem.countdown(title: "Focus", duration: 600, details: "Deep work", tags: ["work"], recurrence: .daily(hour: 9, minute: 0), createdAt: now)
+        try source.start(at: now)
+        let repository = RecordingRepository()
+        await repository.seed(source)
+        let notifications = RecordingNotifications()
+        let state = AppState(repository: repository, notifications: notifications, now: { now })
+
+        await state.handle(notificationAction: .repeatTimer(source.id, duration: 1))
+
+        let created = try XCTUnwrap(state.activeTimers.first { $0.id != source.id })
+        XCTAssertEqual(created.title, source.title)
+        XCTAssertEqual(created.details, source.details)
+        XCTAssertEqual(created.tags, source.tags)
+        XCTAssertEqual(created.duration, source.duration)
+        XCTAssertEqual(created.recurrence, RecurrenceRule.none)
+        let notificationOperations = await notifications.recordedOperations()
+        XCTAssertEqual(notificationOperations, ["schedule"])
+    }
+
+    func testNotificationSnoozeUsesClampedPreferenceAndInvalidPayloadHasNoEffects() async throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let source = try runningCountdown(at: now)
+        let repository = RecordingRepository()
+        await repository.seed(source)
+        let notifications = RecordingNotifications()
+        let state = AppState(repository: repository, notifications: notifications, now: { now })
+        state.preferences = AppPreferences(snoozeSeconds: 5)
+
+        await state.handle(notificationAction: .snooze(source.id, seconds: 999))
+
+        let snoozed = try XCTUnwrap(state.activeTimers.first { $0.id != source.id })
+        XCTAssertEqual(snoozed.duration, 60)
+        await repository.resetOperations()
+        let notificationCount = await notifications.recordedOperations().count
+        let before = state.activeTimers
+        await state.handle(notificationAction: .invalidPayload)
+        let repositoryOperations = await repository.recordedOperations()
+        let finalNotificationCount = await notifications.recordedOperations().count
+        XCTAssertEqual(repositoryOperations, [])
+        XCTAssertEqual(finalNotificationCount, notificationCount)
+        XCTAssertEqual(state.activeTimers, before)
+    }
+
     func testRefreshUsesItsSuppliedTickRatherThanTheInjectedCreationClock() async throws {
         let repository = RecordingRepository()
         let creation = Date(timeIntervalSince1970: 1_000)
@@ -86,6 +241,44 @@ final class AppStateTests: XCTestCase {
         await state.refresh(now: creation.addingTimeInterval(60))
 
         XCTAssertTrue(state.activeTimers.isEmpty)
+    }
+
+    func testRefreshIsDueOnlyBoundedAndIdempotentForTheSameTick() async throws {
+        let created = Date(timeIntervalSince1970: 1_000)
+        let due = try runningCountdown(at: created)
+        var later = try TimerItem.countdown(title: "Later", duration: 600, createdAt: created)
+        try later.start(at: created)
+        let repository = RecordingRepository()
+        await repository.seed(due)
+        await repository.seed(later)
+        let state = AppState(repository: repository, notifications: RecordingNotifications(), now: { created })
+
+        await state.refresh(now: created.addingTimeInterval(300))
+        let firstOperations = await repository.recordedOperations()
+        await repository.resetOperations()
+        await state.refresh(now: created.addingTimeInterval(300))
+        let repeatedOperations = await repository.recordedOperations()
+        let limits = await repository.activeLimits()
+
+        XCTAssertEqual(firstOperations.filter { $0 == "complete" }.count, 1)
+        XCTAssertEqual(state.activeTimers.map(\.title), ["Later"])
+        XCTAssertFalse(repeatedOperations.contains("complete"))
+        XCTAssertEqual(limits.max(), 100)
+    }
+
+    func testPublishedEditorHistoryAndPreferenceFieldsHaveSafeBounds() async throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let timer = try runningCountdown(at: now)
+        let repository = RecordingRepository()
+        await repository.seed(timer)
+        let state = AppState(repository: repository, notifications: RecordingNotifications())
+        await state.load()
+        await state.selectEditor(timer.id)
+        state.preferences.snoozeSeconds = -1
+
+        XCTAssertEqual(state.selectedEditorTimer?.id, timer.id)
+        XCTAssertEqual(state.historyPage.entries, [])
+        XCTAssertEqual(state.preferences.snoozeSeconds, 60)
     }
 
     func testSQLiteRelaunchRecoversActiveTimerHistoryAndPresetSuggestions() async throws {
@@ -132,28 +325,50 @@ final class AppStateTests: XCTestCase {
 
 actor RecordingRepository: TimerRepository {
     var operations: [String] = []
+    var requestedActiveLimits: [Int] = []
     private var timers: [UUID: TimerItem] = [:]
-    private let failInsert: Bool
-    init(failInsert: Bool = false) { self.failInsert = failInsert }
+    private var failures: Set<String>
+    private var activeDelay: Bool = false
+    init(failInsert: Bool = false, failing: Set<String> = []) {
+        failures = failing
+        if failInsert { failures.insert("insert") }
+    }
+    func seed(_ timer: TimerItem) { timers[timer.id] = timer }
+    func fail(_ operation: String) { failures.insert(operation) }
+    func resetOperations() { operations = [] }
+    private func record(_ operation: String) throws {
+        operations.append(operation)
+        if failures.contains(operation) { throw TimerRepositoryError.invalidCreation }
+    }
     func insert(_ timer: TimerItem) async throws -> TimerItem {
-        operations.append("insert")
-        if failInsert { throw TimerRepositoryError.invalidCreation }
+        try record("insert")
         timers[timer.id] = timer
         return timer
     }
-    func update(_ timer: TimerItem) async throws { timers[timer.id] = timer }
+    func update(_ timer: TimerItem) async throws { try record("update"); timers[timer.id] = timer }
     func active(limit: Int) async throws -> [TimerItem] {
-        return Array(timers.values.filter { $0.state == .idle || $0.state == .running || $0.state == .paused }.prefix(limit))
+        try record("publish")
+        requestedActiveLimits.append(limit)
+        return Array(timers.values.filter { $0.state == .idle || $0.state == .running || $0.state == .paused }.sorted { $0.id.uuidString < $1.id.uuidString }.prefix(limit))
     }
     func activePage(limit: Int, after: TimerPageCursor?) async throws -> TimerPage { .init(timers: try await active(limit: limit), nextCursor: nil) }
     func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome {
+        try record("complete")
         guard let timer = timers[id] else { throw TimerRepositoryError.timerNotFound }
         let outcome = try RecurrenceService().complete(timer, at: date)
         timers[id] = outcome.completed
         return outcome
     }
-    func cancel(id: UUID, at: Date) async throws -> TimerItem { fatalError() }
-    func softDelete(_ id: UUID, at: Date) async throws {}
+    func cancel(id: UUID, at date: Date) async throws -> TimerItem {
+        try record("cancel")
+        guard var timer = timers[id] else { throw TimerRepositoryError.timerNotFound }
+        try timer.cancel(at: date); timers[id] = timer; return timer
+    }
+    func softDelete(_ id: UUID, at date: Date) async throws {
+        try record("softDelete")
+        guard var timer = timers[id] else { throw TimerRepositoryError.timerNotFound }
+        try timer.softDelete(at: date); timers[id] = timer
+    }
     func historyPage(from: Date?, through: Date?, query: String, limit: Int, after: HistoryPageCursor?) async throws -> HistoryPage { .init(entries: [], nextCursor: nil) }
     func updateHistory(_ history: HistoryEntry) async throws {}
     func softDeleteHistory(_ id: UUID, at: Date) async throws {}
@@ -161,13 +376,16 @@ actor RecordingRepository: TimerRepository {
     func purgeHistory(endedBefore: Date) async throws -> Int { 0 }
     func historyCount(for: UUID, limit: Int) async throws -> Int { 0 }
     func successors(of: UUID, limit: Int) async throws -> [TimerItem] { [] }
-    func timer(id: UUID) async throws -> TimerItem { throw TimerRepositoryError.timerNotFound }
+    func timer(id: UUID) async throws -> TimerItem { try record("timer"); guard let timer = timers[id] else { throw TimerRepositoryError.timerNotFound }; return timer }
     func recordedOperations() -> [String] { operations }
+    func activeLimits() -> [Int] { requestedActiveLimits }
 }
 
 actor RecordingNotifications: TimerNotificationScheduling {
     var operations: [String] = []
-    func schedule(_ timer: TimerItem) async throws -> NotificationScheduleStatus { operations.append("schedule"); return .scheduled }
+    private let failSchedule: Bool
+    init(failSchedule: Bool = false) { self.failSchedule = failSchedule }
+    func schedule(_ timer: TimerItem) async throws -> NotificationScheduleStatus { operations.append("schedule"); if failSchedule { throw TimerRepositoryError.invalidCreation }; return .scheduled }
     func cancel(timerID: UUID) async throws { operations.append("cancel") }
     func recordedOperations() -> [String] { operations }
 }

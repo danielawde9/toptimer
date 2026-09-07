@@ -74,10 +74,6 @@ public final class AppState: ObservableObject {
             try timer.start(at: submittedAt)
             let persisted = try await repository.insert(timer)
 
-            // Presets are a convenience record: a preset write never makes a
-            // successfully persisted timer disappear from the UI.
-            _ = try? await presets?.record(command: command, tags: parsed.tags, at: submittedAt)
-
             if persisted.kind == .countdown {
                 do {
                     notificationStatus = try await notifications.schedule(persisted)
@@ -87,6 +83,9 @@ public final class AppState: ObservableObject {
                 }
             }
             await publishActive()
+            // Presets are a convenience record. The durable timer has already
+            // been published, so a preset failure cannot affect creation.
+            _ = try? await presets?.record(command: command, tags: parsed.tags, at: submittedAt)
             quickEntryText = ""
             await refreshSuggestions(query: "")
         } catch {
@@ -125,9 +124,13 @@ public final class AppState: ObservableObject {
 
     public func load() async {
         await publishActive()
+        await loadHistory()
+        await refreshSuggestions(query: quickEntryText)
+    }
+
+    public func loadHistory() async {
         do { historyPage = try await repository.historyPage(from: nil, through: nil, query: "", limit: 100, after: nil) }
         catch { inlineError = "Could not load timer history." }
-        await refreshSuggestions(query: quickEntryText)
     }
 
     public func refreshSuggestions(query: String) async {
@@ -142,20 +145,33 @@ public final class AppState: ObservableObject {
     }
 
     @discardableResult public func pause(_ id: UUID) async -> Bool { await transition(id, failure: "Could not pause timer.", mutation: { try $0.pause(at: self.now()) }, effect: { _ in try await self.notifications.cancel(timerID: id) }) }
+    @discardableResult public func start(_ id: UUID) async -> Bool { await transition(id, failure: "Could not start timer.", mutation: { try $0.start(at: self.now()) }, effect: { timer in await self.scheduleAfterPersistence(timer) }) }
     @discardableResult public func resume(_ id: UUID) async -> Bool { await transition(id, failure: "Could not resume timer.", mutation: { try $0.resume(at: self.now()) }, effect: { timer in await self.scheduleAfterPersistence(timer) }) }
     @discardableResult public func restart(_ id: UUID) async -> Bool { await transition(id, failure: "Could not restart timer.", mutation: { try $0.restart(at: self.now()) }, effect: { timer in await self.scheduleAfterPersistence(timer) }) }
     @discardableResult public func acknowledge(_ id: UUID) async -> Bool { await transition(id, failure: "Could not acknowledge timer.", mutation: { try $0.acknowledge(at: self.now()) }, effect: { _ in try await self.notifications.cancel(timerID: id) }) }
     @discardableResult public func softDelete(_ id: UUID) async -> Bool { do { try await repository.softDelete(id, at: now()); await cancelAfterPersistence(id); await publishActive(); return true } catch { inlineError = "Could not delete timer."; return false } }
     @discardableResult public func cancel(_ id: UUID) async -> Bool { do { _ = try await repository.cancel(id: id, at: now()); await cancelAfterPersistence(id); await publishActive(); return true } catch { inlineError = "Could not cancel timer."; return false } }
     @discardableResult public func complete(_ id: UUID) async -> Bool { do { let outcome = try await repository.complete(id, at: now()); if let successor = outcome.successor { await scheduleAfterPersistence(successor) }; await publishActive(); return true } catch { inlineError = "Could not complete timer."; return false } }
+    @discardableResult public func edit(_ id: UUID, title: String, details: String, tags: [String]) async -> Bool {
+        await transition(id, failure: "Could not edit timer.", mutation: { try $0.updateMetadata(title: title, details: details, tags: tags) }, effect: { timer in
+            try await self.notifications.cancel(timerID: id)
+            await self.scheduleAfterPersistence(timer)
+        })
+    }
+
+    /// Recovers the repository's supported history record; active timers are not recovered.
+    @discardableResult public func recoverHistory(_ id: UUID) async -> Bool {
+        do { try await repository.recoverHistory(id); await loadHistory(); return true }
+        catch { inlineError = "Could not recover timer history."; return false }
+    }
 
     /// NotificationController performs category and payload validation before
     /// this boundary is called; invalid values intentionally have no effects.
     public func handle(notificationAction action: TimerNotificationAction) async {
         switch action {
         case let .stop(id): await cancel(id)
-        case let .repeatTimer(id, duration): await createActionTimer(from: id, duration: duration)
-        case let .snooze(id, seconds): await createActionTimer(from: id, duration: seconds)
+        case let .repeatTimer(id, _): await repeatActionTimer(from: id)
+        case let .snooze(id, _): await createActionTimer(from: id, duration: preferences.snoozeSeconds)
         case .invalidPayload: return
         }
     }
@@ -164,6 +180,21 @@ public final class AppState: ObservableObject {
         guard duration.isFinite, duration > 0, duration <= TimerLimits.maximumDuration else { return }
         do {
             let source = try await repository.timer(id: id)
+            await createActionTimer(from: source, duration: duration)
+        } catch { inlineError = "Could not create timer from notification action." }
+    }
+
+    private func repeatActionTimer(from id: UUID) async {
+        do {
+            let source = try await repository.timer(id: id)
+            guard let duration = source.duration else { return }
+            await createActionTimer(from: source, duration: duration)
+        } catch { inlineError = "Could not create timer from notification action." }
+    }
+
+    private func createActionTimer(from source: TimerItem, duration: TimeInterval) async {
+        guard duration.isFinite, duration > 0, duration <= TimerLimits.maximumDuration else { return }
+        do {
             let date = now()
             var timer = try TimerItem.countdown(title: source.title, duration: duration, details: source.details, tags: source.tags, createdAt: date)
             try timer.start(at: date)
@@ -197,6 +228,9 @@ public final class AppState: ObservableObject {
 }
 
 public struct AppPreferences: Equatable, Sendable {
-    public var snoozeSeconds: TimeInterval
-    public init(snoozeSeconds: TimeInterval = 300) { self.snoozeSeconds = min(86_400, max(60, snoozeSeconds)) }
+    public var snoozeSeconds: TimeInterval {
+        didSet { snoozeSeconds = Self.clamped(snoozeSeconds) }
+    }
+    public init(snoozeSeconds: TimeInterval = 300) { self.snoozeSeconds = Self.clamped(snoozeSeconds) }
+    static func clamped(_ value: TimeInterval) -> TimeInterval { min(86_400, max(60, value)) }
 }
