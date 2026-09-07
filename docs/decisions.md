@@ -3,6 +3,26 @@
 This ledger is append-only. Later changes supersede earlier entries rather than
 rewriting history.
 
+## 2026-09-07 — Timer alert delivery and custom sounds
+
+**Decision:** TopTimer schedules at most 64 notifications in its own
+`TOPTIMER_TIMER` category, identifies each request as `timer-<timer UUID>`, and
+offers Stop, Repeat, and Snooze actions. Permission is requested only when the
+caller explicitly marks a first successful timer creation; later scheduling
+checks the current authorization state without opening a system prompt. Snooze
+is clamped to 60 seconds through 24 hours. Custom alert files are copied from a
+regular, non-link AIFF, WAV, CAF, or MP3 file no larger than 20 MB into
+Application Support/TopTimer/Sounds, and failures fall back to the system Glass
+sound.
+
+**Why:** Stable identifiers make cancellation and action routing safe, bounded
+ownership prevents TopTimer from affecting other apps' notifications, and the
+file limits avoid unsafe or unexpectedly expensive local imports.
+
+**If the client answers differently:** More pending alerts, extra formats,
+different snooze limits, or a different fallback sound require matching UI,
+storage, and regression-test changes.
+
 ## 2026-09-04 — Native macOS implementation
 
 **Decision:** Build TopTimer with SwiftUI and small AppKit integration points,

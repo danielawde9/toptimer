@@ -15,6 +15,10 @@ let package = Package(
         .library(
             name: "TopTimerPersistence",
             targets: ["TopTimerPersistence"]
+        ),
+        .library(
+            name: "TopTimerSystem",
+            targets: ["TopTimerSystem"]
         )
     ],
     targets: [
@@ -23,6 +27,7 @@ let package = Package(
             name: "TopTimerPersistence",
             dependencies: ["TopTimerDomain"]
         ),
+        .target(name: "TopTimerSystem"),
         .testTarget(
             name: "TopTimerDomainTests",
             dependencies: ["TopTimerDomain"]
@@ -30,6 +35,10 @@ let package = Package(
         .testTarget(
             name: "TopTimerPersistenceTests",
             dependencies: ["TopTimerDomain", "TopTimerPersistence"]
+        ),
+        .testTarget(
+            name: "TopTimerSystemTests",
+            dependencies: ["TopTimerSystem"]
         )
     ]
 )
