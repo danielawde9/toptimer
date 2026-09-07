@@ -7,6 +7,22 @@ package_script="${repo_root}/scripts/package-app.sh"
 verify_script="${repo_root}/scripts/verify-app.sh"
 output_app="${repo_root}/build/TopTimer.app"
 sentinel="${output_app}/Contents/Resources/transaction-test-sentinel.txt"
+test_root="$(/usr/bin/mktemp -d "${repo_root}/build/.transaction-tests.XXXXXX")"
+package_log="${test_root}/package.log"
+
+cleanup() {
+  if [[ -f "${sentinel}" && ! -L "${sentinel}" ]]; then
+    if [[ "$(<"${sentinel}")" == "existing verified output must survive late candidate failure" ]]; then
+      /bin/rm "${sentinel}"
+      /usr/bin/codesign --force --deep --sign - "${output_app}" >/dev/null 2>&1
+    fi
+  fi
+  if [[ -f "${package_log}" && ! -L "${package_log}" ]]; then
+    /bin/rm "${package_log}"
+  fi
+  /bin/rmdir "${test_root}"
+}
+trap cleanup EXIT
 
 fingerprint() {
   /usr/bin/find "$1" -type f -exec /usr/bin/shasum -a 256 {} \; \
@@ -23,7 +39,7 @@ before="$(fingerprint "${output_app}")"
 
 set +e
 TOPTIMER_TEST_FAIL_AFTER_CANDIDATE_VERIFY=1 \
-  /bin/bash "${package_script}" >/tmp/toptimer-transaction-test.log 2>&1
+  /bin/bash "${package_script}" >"${package_log}" 2>&1
 exit_code=$?
 set -e
 after="$(fingerprint "${output_app}")"

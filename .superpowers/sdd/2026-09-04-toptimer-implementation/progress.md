@@ -15,6 +15,9 @@
   package publication preserves the previous verified artifact across a forced late
   failure, the local artifact is accurately documented as arm64-only, and 256 tests,
   strict release, two package runs, reinstall, and single-process proof passed.
+- Task 12 final packaging safety fix: complete. The transactional test uses a bounded
+  unique log path, exact cleanup leaves no log/temp/sentinel, and the symlink-truncation
+  regression was reproduced RED then verified GREEN.
 
 ## Resume ruling
 
