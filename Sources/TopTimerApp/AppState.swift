@@ -8,13 +8,24 @@ import TopTimerSystem
 /// protocol instead of talking to UserNotifications.
 public protocol TimerNotificationScheduling: Sendable {
     func schedule(_ timer: TimerItem) async throws -> NotificationScheduleStatus
+    func scheduleCreatedTimer(_ timer: TimerItem) async throws -> NotificationScheduleStatus
+    func validateSound(name: String?) async throws
     func cancel(timerID: UUID) async throws
 }
 
+extension TimerNotificationScheduling {
+    public func scheduleCreatedTimer(_ timer: TimerItem) async throws -> NotificationScheduleStatus { try await schedule(timer) }
+    public func validateSound(name: String?) async throws {}
+}
+
 extension NotificationController: TimerNotificationScheduling {
+    public func scheduleCreatedTimer(_ timer: TimerItem) async throws -> NotificationScheduleStatus {
+        guard timer.kind == .countdown, let deadline = timer.deadline else { return .scheduled }
+        return try await schedule(timerID: timer.id, title: timer.title, details: timer.details, fireDate: deadline, requestAuthorizationForFirstSuccessfulCreation: true, alertName: timer.alertName)
+    }
     public func schedule(_ timer: TimerItem) async throws -> NotificationScheduleStatus {
         guard let deadline = timer.deadline else { return .scheduled }
-        return try await schedule(timerID: timer.id, title: timer.title, details: timer.details, fireDate: deadline)
+        return try await schedule(timerID: timer.id, title: timer.title, details: timer.details, fireDate: deadline, alertName: timer.alertName)
     }
 }
 
@@ -36,6 +47,7 @@ public final class AppState: ObservableObject {
 
     private let repository: any TimerRepository
     private let notifications: any TimerNotificationScheduling
+    private let alertSounds: AlertSoundController?
     private let presets: (any PresetRepository)?
     private let now: () -> Date
     private let parser: (Date) -> TimerParser
@@ -44,11 +56,13 @@ public final class AppState: ObservableObject {
         repository: any TimerRepository,
         notifications: any TimerNotificationScheduling,
         presets: (any PresetRepository)? = nil,
+        alertSounds: AlertSoundController? = nil,
         now: @escaping () -> Date = { .now },
         parser: @escaping (Date) -> TimerParser = { TimerParser(now: $0) }
     ) {
         self.repository = repository
         self.notifications = notifications
+        self.alertSounds = alertSounds
         self.presets = presets
         self.now = now
         self.parser = parser
@@ -77,7 +91,7 @@ public final class AppState: ObservableObject {
 
             if persisted.kind == .countdown {
                 do {
-                    notificationStatus = try await notifications.schedule(persisted)
+                    notificationStatus = try await notifications.scheduleCreatedTimer(persisted)
                 } catch {
                     notificationStatus = nil
                     inlineError = "Timer saved, but notification scheduling failed."
@@ -120,6 +134,7 @@ public final class AppState: ObservableObject {
             let current = try await repository.due(at: date, limit: 100)
             for timer in current {
                 let outcome = try await repository.complete(timer.id, at: date)
+                if outcome.completed != timer { await playCompletion(outcome.completed) }
                 if let successor = outcome.successor { await scheduleAfterPersistence(successor) }
             }
         } catch { inlineError = "Could not refresh timers." }
@@ -174,7 +189,7 @@ public final class AppState: ObservableObject {
         } catch { inlineError = "Could not restore timer."; return false }
     }
     @discardableResult public func cancel(_ id: UUID) async -> Bool { do { _ = try await repository.cancel(id: id, at: now()); await cancelAfterPersistence(id); await publishActive(); return true } catch { inlineError = "Could not cancel timer."; return false } }
-    @discardableResult public func complete(_ id: UUID) async -> Bool { do { let outcome = try await repository.complete(id, at: now()); if let successor = outcome.successor { await scheduleAfterPersistence(successor) }; await publishActive(); return true } catch { inlineError = "Could not complete timer."; return false } }
+    @discardableResult public func complete(_ id: UUID) async -> Bool { do { let prior = try await repository.timer(id: id); let outcome = try await repository.complete(id, at: now()); if outcome.completed != prior { await playCompletion(outcome.completed) }; if let successor = outcome.successor { await scheduleAfterPersistence(successor) }; await publishActive(); return true } catch { inlineError = "Could not complete timer."; return false } }
     @discardableResult public func edit(_ id: UUID, title: String, details: String, tags: [String]) async -> Bool {
         await transition(id, failure: "Could not edit timer.", mutation: { try $0.updateMetadata(title: title, details: details, tags: tags) }, effect: { timer in
             try await self.notifications.cancel(timerID: id)
@@ -182,7 +197,9 @@ public final class AppState: ObservableObject {
         })
     }
     @discardableResult public func reconfigure(_ id: UUID, configuration: TimerConfiguration) async -> Bool {
-        await transition(id, failure: "Could not edit timer.", mutation: { try $0.reconfigure(configuration, at: self.now()) }, effect: { timer in
+        do { try await notifications.validateSound(name: configuration.alertName) }
+        catch { inlineError = "Could not use the selected sound. Previous settings are unchanged. \(error.localizedDescription)"; return false }
+        return await transition(id, failure: "Could not edit timer.", mutation: { try $0.reconfigure(configuration, at: self.now()) }, effect: { timer in
             try await self.notifications.cancel(timerID: id)
             await self.scheduleAfterPersistence(timer)
         })
@@ -258,6 +275,17 @@ public final class AppState: ObservableObject {
     private func cancelAfterPersistence(_ id: UUID) async {
         do { try await notifications.cancel(timerID: id) }
         catch { inlineError = "Timer saved, but notification scheduling failed." }
+    }
+
+    private func playCompletion(_ timer: TimerItem) async {
+        guard let alertSounds else { return }
+        do {
+            let url = try timer.alertName.map { try AlertSoundIdentity.sourceURL(name: $0) }
+            await alertSounds.play(customSound: url, volume: timer.alertVolume)
+        } catch {
+            inlineError = "Could not play the selected alert sound. Using the default sound."
+            await alertSounds.play(customSound: nil, volume: timer.alertVolume)
+        }
     }
 
     private func scheduleAfterPersistence(_ timer: TimerItem) async {

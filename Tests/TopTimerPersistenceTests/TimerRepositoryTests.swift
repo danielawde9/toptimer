@@ -5,6 +5,39 @@ import TopTimerDomain
 @testable import TopTimerPersistence
 
 final class TimerRepositoryTests: XCTestCase {
+    func testTerminalUpdatesReplayAcknowledgementRestartAndMetadataExactly() async throws {
+        let repository = try await repository()
+        var timer = try countdown(); try timer.start(at: created)
+        _ = try await repository.insert(timer)
+        _ = try await repository.complete(timer.id, at: created.addingTimeInterval(60))
+        let completed = try await repository.timer(id: timer.id)
+        var acknowledged = completed
+        try acknowledged.acknowledge(at: created.addingTimeInterval(61))
+        try await repository.update(acknowledged)
+        var metadata = acknowledged
+        try metadata.updateMetadata(title: "Acknowledged edit", details: "detail", tags: ["done"])
+        try await repository.update(metadata)
+        var restarted = metadata
+        try restarted.restart(at: created.addingTimeInterval(62))
+        try await repository.update(restarted)
+        let saved = try await repository.timer(id: timer.id)
+        XCTAssertEqual(saved, restarted)
+        await XCTAssertThrowsErrorAsync({ try await repository.update(acknowledged) }, matching: .staleTimerUpdate)
+    }
+
+    func testCompletedTimerAllowsEditorReconfigurationAndDirectRestart() async throws {
+        let repository = try await repository()
+        var timer = try countdown(); try timer.start(at: created)
+        _ = try await repository.insert(timer)
+        _ = try await repository.complete(timer.id, at: created.addingTimeInterval(60))
+        var saved = try await repository.timer(id: timer.id)
+        try saved.reconfigure(title: "Edited completion", details: "done", tags: [], duration: saved.duration, recurrence: saved.recurrence, alertName: "Ping", alertVolume: 0.4, at: created.addingTimeInterval(61))
+        try await repository.update(saved)
+        try saved.restart(at: created.addingTimeInterval(62))
+        try await repository.update(saved)
+        let result = try await repository.timer(id: timer.id)
+        XCTAssertEqual(result, saved)
+    }
     private let created = Date(timeIntervalSinceReferenceDate: 1_000)
     private let completed = Date(timeIntervalSinceReferenceDate: 1_100)
 

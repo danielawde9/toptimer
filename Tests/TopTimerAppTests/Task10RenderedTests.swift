@@ -8,6 +8,16 @@ import XCTest
 
 @MainActor
 final class Task10RenderedTests: XCTestCase {
+  func testEditorDoesNotOfferImmutableKindChanges() {
+    let host = NSHostingView(
+      rootView: TimerEditorView(draft: .constant(EditorDraft())) { _ in false })
+    let window = mount(host)
+    defer { window.close() }
+    XCTAssertFalse(
+      accessibilityNodes(host).compactMap { $0 as? NSPopUpButton }.contains {
+        $0.itemTitles.contains("Stopwatch")
+      })
+  }
   func testSelectedWeekdaysRendersSevenChoices() {
     var draft = EditorDraft()
     draft.recurrenceMode = .selectedWeekdays
@@ -89,7 +99,8 @@ final class Task10RenderedTests: XCTestCase {
     let fields = nodes.compactMap { $0 as? NSTextField }
     XCTAssertEqual(fields.count, 6, "Title, details, tags, duration, hour, minute")
     XCTAssertEqual(
-      nodes.compactMap { $0 as? NSPopUpButton }.count, 4, "Type, recurrence, weekday, sound")
+      nodes.compactMap { $0 as? NSPopUpButton }.count, 3,
+      "Recurrence, weekday, sound; kind is read only")
   }
 
   func testQuickToolbarHasExactlyFourAccessibleControlsWithRunningTimer() async {

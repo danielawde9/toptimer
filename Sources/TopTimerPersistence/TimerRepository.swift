@@ -602,12 +602,13 @@ public actor TimerCoreDataRepository: TimerRepository {
     }
 
     private static func validateUpdate(_ incoming: TimerItem, against stored: TimerItem) throws {
+        // Acknowledgement archives using deletedAt at the transition timestamp.
+        // All incoming fields still require exact replay of one allowed domain operation.
         guard incoming.id == stored.id,
               incoming.occurrenceID == stored.occurrenceID,
               incoming.predecessorOccurrenceID == stored.predecessorOccurrenceID,
               incoming.successorID == stored.successorID,
-              stored.deletedAt == nil,
-              incoming.deletedAt == nil,
+              stored.deletedAt == nil || (stored.state == .acknowledged && stored.deletedAt == stored.lastTransitionAt),
               stored.revision < Int.max,
               incoming.revision == stored.revision + 1,
               isPermittedUpdate(incoming, from: stored) else {
@@ -616,10 +617,17 @@ public actor TimerCoreDataRepository: TimerRepository {
     }
 
     private static func isPermittedUpdate(_ incoming: TimerItem, from stored: TimerItem) -> Bool {
-        guard incoming.state == .idle || incoming.state == .running || incoming.state == .paused else {
-            return false
-        }
         switch (stored.state, incoming.state) {
+        case (.completed, .completed), (.acknowledged, .acknowledged), (.cancelled, .cancelled):
+            return matchesMetadataUpdate(incoming, from: stored) || matchesReconfiguration(incoming, from: stored)
+        case (.completed, .acknowledged):
+            return matchesTransition(incoming, from: stored) { timer, date in
+                try timer.acknowledge(at: date)
+            }
+        case (.completed, .running), (.acknowledged, .running), (.cancelled, .running):
+            return matchesTransition(incoming, from: stored) { timer, date in
+                try timer.restart(at: date)
+            }
         case (.idle, .idle), (.paused, .paused):
             return matchesMetadataUpdate(incoming, from: stored) || matchesReconfiguration(incoming, from: stored)
         case (.running, .running):

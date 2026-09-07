@@ -371,3 +371,34 @@ visible as unavailable; load failure retains the last catalog and offers Retry.
 separate explicit units control; larger deleted/sound collections require
 pagination/search. Restoring as a fresh run would require a new occurrence rather
 than preserving the existing deadline.
+
+## 2026-09-07 — Task 10 notification and playback boundaries
+
+**Decision:** Only the successfully persisted countdown-creation path requests
+notification permission when undetermined. Stopwatches and failed saves never
+request it. Editing an existing timer displays its immutable kind as read-only.
+
+**Decision:** Per-timer sound and volume remain configurable. While TopTimer runs,
+durable due/manual completion uses AlertSoundController with the chosen sound and
+volume. The OS notification independently uses the chosen named sound; its
+volume remains controlled by macOS. The editor states this distinction explicitly.
+Normal notification volume is not represented as a critical-alert volume API.
+
+**Decision:** Notification audio is staged as PCM CAF in Library/Sounds because
+UserNotifications does not search TopTimer's Application Support import folder.
+Staging uses the existing 20 MB no-follow/exclusive copy boundary, 1...30-second
+mono/stereo audio at at most 192 kHz, 4,096-frame conversion buffers, and at most
+100 TopTimer cache files after a bounded 1,000-child directory inspection. Files
+are named by a hash of their stable sound identity and never overwritten. Sound
+preparation failure preserves the previous persisted editor configuration.
+
+**Why:** This connects existing UI settings to real platform operations without
+claiming control of the user's OS notification volume or silently accepting an
+unplayable notification sound. Exact domain replay plus revision CAS, rather
+than state-only allowlisting, authorizes terminal metadata, acknowledgement,
+and restart persistence.
+
+**If the client answers differently:** Longer notification sounds require an
+explicit truncation/selection policy; a larger cache requires bounded eviction
+or pagination. Critical-alert volume would require a separately justified Apple
+entitlement and must not be used to emulate ordinary timer-volume settings.

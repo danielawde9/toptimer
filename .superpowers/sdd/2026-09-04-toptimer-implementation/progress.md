@@ -37,3 +37,11 @@ editor controls, bounded production sound catalog, state-aware timing, stable
 native Actions menu, four-control toolbar, and real bounded Recently Deleted
 with Restore. 207 tests and strict warning-as-error debug/release builds pass.
 Pending independent review; VoiceOver end-to-end testing remains unclaimed.
+
+## Task 10 round 5
+
+Production authorization/sound propagation, configured in-app playback volume,
+exact terminal repository transitions, immutable editor kind, and native
+pass-through commands repaired. See task-10-fix-round-5-report.md. Final 219 tests
+and strict warning-as-error debug/release builds pass. Pending independent
+review; packaged audible playback and full accessibility smoke tests unclaimed.

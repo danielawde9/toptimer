@@ -126,10 +126,10 @@ public struct TimerEditorView: View {
   }
   public var body: some View {
     Form {
-      Picker("Timer type", selection: $draft.kind) {
-        Text("Countdown").tag(TimerKind.countdown)
-        Text("Stopwatch").tag(TimerKind.stopwatch)
-      }
+      Text(draft.kind == .countdown ? "Timer type: Countdown" : "Timer type: Stopwatch")
+        .accessibilityLabel(
+          draft.kind == .countdown
+            ? "Timer type: Countdown, read only" : "Timer type: Stopwatch, read only")
       TextField("Title", text: $draft.title).accessibilityIdentifier("timer-editor-title")
       TextField("Details", text: $draft.details, axis: .vertical)
       TextField(
@@ -155,7 +155,10 @@ public struct TimerEditorView: View {
           Text("Unavailable: \(selected)").tag(selected)
         }
       }
-      Slider(value: $draft.volume, in: 0...1) { Text("Volume") }
+      Slider(value: $draft.volume, in: 0...1) { Text("In-app alert volume") }
+      Text(
+        "This volume applies while TopTimer is running. macOS controls notification-banner volume in Sound settings."
+      ).font(.caption).foregroundStyle(.secondary)
       if let message = error ?? draft.validationError() ?? soundError {
         Text(message).foregroundStyle(.red).accessibilityLabel(message)
       }

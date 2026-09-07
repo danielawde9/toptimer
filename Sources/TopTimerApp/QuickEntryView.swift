@@ -67,7 +67,7 @@ public struct QuickEntryView: View {
       selectedSuggestion = 0
     case .close: closePopover()
     case .togglePriority: togglePriority()
-    case .passThrough: break
+    case .passThrough, .selectSuggestion: break
     }
   }
   /// Selecting a suggestion and pressing Return runs it immediately, exactly like clicking Run.

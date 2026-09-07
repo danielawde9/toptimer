@@ -137,7 +137,7 @@ final class AppStateTests: XCTestCase {
         let completed = await completeState.complete(recurring.id)
         XCTAssertTrue(completed)
         let completeOperations = await completeLog.operations()
-        XCTAssertEqual(completeOperations, ["complete", "schedule", "publish"])
+        XCTAssertEqual(completeOperations, ["timer", "complete", "schedule", "publish"])
 
         let recoveryLog = OperationRecorder(); let recoveryState = AppState(repository: RecordingRepository(recorder: recoveryLog), notifications: RecordingNotifications(recorder: recoveryLog))
         let recovered = await recoveryState.recoverHistory(UUID())
@@ -214,7 +214,7 @@ final class AppStateTests: XCTestCase {
             let repositoryOperations = await repository.recordedOperations()
             let notificationOperations = await notifications.recordedOperations()
             XCTAssertTrue(succeeded)
-            let expected = ["cancel", "softDelete", "complete"].contains(operation) ? [operation, "publish"] : ["timer", operation, "publish"]
+            let expected = ["cancel", "softDelete"].contains(operation) ? [operation, "publish"] : ["timer", operation, "publish"]
             XCTAssertEqual(repositoryOperations, expected)
             let expectedNotifications = operation == "update" && notification == "cancel" && !state.activeTimers.isEmpty && state.activeTimers[0].kind == .countdown && state.activeTimers[0].state == .running ? ["cancel", "schedule"] : (notification.isEmpty ? [] : [notification])
             XCTAssertEqual(notificationOperations, expectedNotifications)
