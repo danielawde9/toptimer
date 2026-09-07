@@ -18,6 +18,7 @@ public enum RecurrenceValidationError: Error, Equatable, Sendable {
 }
 
 public struct TimerLimits: Sendable {
+    public static let maximumDuration: TimeInterval = 365 * 24 * 60 * 60
     public static let title = 80
     public static let details = 500
     public static let tags = 12
@@ -285,7 +286,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
 
         switch kind {
         case .countdown:
-            guard let duration, duration.isFinite, duration > 0 else {
+            guard let duration, duration.isFinite, duration > 0, duration <= TimerLimits.maximumDuration else {
                 throw TimerValidationError.nonPositiveDuration
             }
             self.duration = duration
@@ -555,7 +556,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
             guard accumulatedPause == 0 else {
                 throw TimerShapeValidationError.invalidShape
             }
-            guard let duration, duration.isFinite, duration > 0 else {
+            guard let duration, duration.isFinite, duration > 0, duration <= TimerLimits.maximumDuration else {
                 throw TimerShapeValidationError.invalidShape
             }
             if let remaining, (!remaining.isFinite || remaining < 0 || remaining > duration) {

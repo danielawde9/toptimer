@@ -22,13 +22,41 @@ final class AlertSoundControllerTests: XCTestCase {
     }
     func testFilesystemFailuresBecomeTypedErrors() async throws {
         let source = URL(fileURLWithPath: "/ok.wav")
-        for failure in ["kind", "size", "directory", "copy"] {
+        for failure in ["directory", "copy"] {
             let files = SoundFileStoreSpy(files: ["ok.wav": .regular(data: Data())], failure: failure)
             let controller = AlertSoundController(files: files, player: SoundPlayerSpy())
             do { _ = try await controller.importSound(from: source); XCTFail("Expected typed error") }
             catch let error as AlertSoundError { XCTAssertFalse(error.localizedDescription.isEmpty) }
             catch { XCTFail("Expected AlertSoundError") }
         }
+    }
+    func testLocalStoreRejectsSymlinkAndNeverOverwritesDestination() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.wav")
+        let link = directory.appendingPathComponent("link.wav")
+        let destination = directory.appendingPathComponent("destination.wav")
+        try Data([1, 2, 3]).write(to: source)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: source)
+        let store = LocalSoundFileStore()
+        await XCTAssertThrowsErrorAsync(try await store.importRegularFile(from: link, to: destination, maximumBytes: 20_000_000))
+        try Data([9]).write(to: destination)
+        await XCTAssertThrowsErrorAsync(try await store.importRegularFile(from: source, to: destination, maximumBytes: 20_000_000))
+        XCTAssertEqual(try Data(contentsOf: destination), Data([9]))
+    }
+
+    func testLocalStoreAcceptsExactLimitAndRejectsOverLimit() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let exact = directory.appendingPathComponent("exact.wav")
+        let over = directory.appendingPathComponent("over.wav")
+        try Data(repeating: 1, count: 20_000_000).write(to: exact)
+        try Data(repeating: 1, count: 20_000_001).write(to: over)
+        let store = LocalSoundFileStore()
+        try await store.importRegularFile(from: exact, to: directory.appendingPathComponent("copied.wav"), maximumBytes: 20_000_000)
+        await XCTAssertThrowsErrorAsync(try await store.importRegularFile(from: over, to: directory.appendingPathComponent("too-big.wav"), maximumBytes: 20_000_000))
     }
 }
 
@@ -37,10 +65,13 @@ actor SoundFileStoreSpy: SoundFileStore {
     var copies: [(URL, URL)] = []
     let failure: String?
     init(files: [String: SoundFileKind], sizes: [String: Int] = [:], failure: String? = nil) { self.files = files; self.sizes = sizes; self.failure = failure }
-    func kind(at url: URL) async throws -> SoundFileKind { if failure == "kind" { throw CocoaError(.fileReadUnknown) }; return files[url.lastPathComponent] ?? .missing }
-    func size(at url: URL) async throws -> Int { if failure == "size" { throw CocoaError(.fileReadUnknown) }; return sizes[url.lastPathComponent] ?? (files[url.lastPathComponent]?.data?.count ?? 0) }
     func applicationSupportSoundsDirectory() async throws -> URL { if failure == "directory" { throw CocoaError(.fileNoSuchFile) }; return URL(fileURLWithPath: "/sounds") }
-    func copy(_ source: URL, to destination: URL) async throws { if failure == "copy" { throw CocoaError(.fileWriteUnknown) }; copies.append((source, destination)) }
+    func importRegularFile(from source: URL, to destination: URL, maximumBytes: Int) async throws {
+        if failure == "copy" { throw CocoaError(.fileWriteUnknown) }
+        guard case .regular = files[source.lastPathComponent] ?? .missing else { throw AlertSoundError.unsafeInput }
+        guard sizes[source.lastPathComponent] ?? 0 <= maximumBytes else { throw AlertSoundError.fileTooLarge }
+        copies.append((source, destination))
+    }
 }
 actor SoundPlayerSpy: SoundPlayer {
     let customResult: Bool; var volumes: [Double] = []; var played: [URL?] = []

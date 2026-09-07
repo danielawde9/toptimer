@@ -1,5 +1,6 @@
 @preconcurrency import UserNotifications
 import Foundation
+import TopTimerDomain
 
 public enum NotificationAuthorizationStatus: Sendable, Equatable { case notDetermined, authorized, denied, provisional, ephemeral }
 public struct NotificationAction: Sendable, Equatable { public let identifier: String; public let title: String; public init(_ identifier: String, _ title: String) { self.identifier = identifier; self.title = title } }
@@ -33,16 +34,21 @@ public struct NotificationController: Sendable {
         let owned = pending.filter(Self.isOwned).sorted { lhs, rhs in
             lhs.createdAt == rhs.createdAt ? lhs.identifier < rhs.identifier : lhs.createdAt < rhs.createdAt
         }
-        if owned.count >= Self.maxPendingRequests, let oldest = owned.first { await center.removePendingRequests(identifiers: [oldest.identifier]) }
-        try await center.add(NotificationRequest(identifier: Self.identifier(for: timerID), title: title, body: Self.truncated(details), categoryIdentifier: Self.categoryIdentifier, fireDate: fireDate))
+        let identifier = Self.identifier(for: timerID)
+        let existing = owned.filter { $0.identifier == identifier }
+        let otherOwned = owned.filter { $0.identifier != identifier }
+        let removalCount = max(0, otherOwned.count + 1 - Self.maxPendingRequests)
+        let removals = existing.map(\.identifier) + otherOwned.prefix(removalCount).map(\.identifier)
+        if !removals.isEmpty { await center.removePendingRequests(identifiers: removals) }
+        try await center.add(NotificationRequest(identifier: identifier, title: title, body: Self.truncated(details), categoryIdentifier: Self.categoryIdentifier, fireDate: fireDate))
         return .scheduled
     }
     public func cancel(timerID: UUID) async throws { await center.removePendingRequests(identifiers: [Self.identifier(for: timerID)]) }
-    public func route(actionIdentifier: String, requestIdentifier: String, savedDuration: TimeInterval?, snoozePreference: TimeInterval) -> TimerNotificationAction {
-        guard let id = Self.timerID(from: requestIdentifier) else { return .invalidPayload }
+    public func route(actionIdentifier: String, categoryIdentifier: String, requestIdentifier: String, savedDuration: TimeInterval?, snoozePreference: TimeInterval) -> TimerNotificationAction {
+        guard categoryIdentifier == Self.categoryIdentifier, let id = Self.timerID(from: requestIdentifier) else { return .invalidPayload }
         switch actionIdentifier {
         case "STOP": return .stop(id)
-        case "REPEAT": guard let savedDuration, savedDuration > 0 else { return .invalidPayload }; return .repeatTimer(id, duration: savedDuration)
+        case "REPEAT": guard let savedDuration, savedDuration.isFinite, savedDuration > 0, savedDuration <= TimerLimits.maximumDuration else { return .invalidPayload }; return .repeatTimer(id, duration: savedDuration)
         case "SNOOZE": return .snooze(id, seconds: min(86_400, max(60, snoozePreference)))
         default: return .invalidPayload
         }

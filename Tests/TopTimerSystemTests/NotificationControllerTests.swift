@@ -1,5 +1,6 @@
 import XCTest
 @testable import TopTimerSystem
+@testable import TopTimerDomain
 
 final class NotificationControllerTests: XCTestCase {
     func testAuthorizedScheduleUsesStableIDTruncatedUnicodeBodyAndCategory() async throws {
@@ -66,6 +67,23 @@ final class NotificationControllerTests: XCTestCase {
         await XCTAssertThrowsErrorAsync(try await NotificationController(center: center).schedule(timerID: UUID(), title: "x", details: "", fireDate: .now))
     }
 
+    func testReplacingExistingTimerDoesNotEvictAnotherTimer() async throws {
+        let id = UUID()
+        let owned = (0..<64).map { offset in PendingNotification(identifier: offset == 0 ? NotificationController.identifier(for: id) : "timer-\(offset)", categoryIdentifier: NotificationController.categoryIdentifier, body: "", createdAt: Date(timeIntervalSince1970: TimeInterval(offset))) }
+        let center = NotificationCenterSpy(status: .authorized, pending: owned)
+        _ = try await NotificationController(center: center).schedule(timerID: id, title: "x", details: "", fireDate: .now)
+        let removed = await center.removed
+        XCTAssertEqual(removed, [NotificationController.identifier(for: id)])
+    }
+
+    func testOverCapacityRecoversToSixtyFourWithoutTouchingUnrelatedRequests() async throws {
+        let owned = (0..<66).map { PendingNotification(identifier: "timer-\($0)", categoryIdentifier: NotificationController.categoryIdentifier, body: "", createdAt: Date(timeIntervalSince1970: TimeInterval($0))) }
+        let center = NotificationCenterSpy(status: .authorized, pending: owned + [.init(identifier: "other", categoryIdentifier: "other", body: "", createdAt: .distantPast)])
+        _ = try await NotificationController(center: center).schedule(timerID: UUID(), title: "x", details: "", fireDate: .now)
+        let removed = await center.removed
+        XCTAssertEqual(removed, ["timer-0", "timer-1", "timer-2"])
+    }
+
     func testCancelAndActionsValidatePayload() async throws {
         let center = NotificationCenterSpy(status: .authorized)
         let controller = NotificationController(center: center)
@@ -73,10 +91,9 @@ final class NotificationControllerTests: XCTestCase {
         try await controller.cancel(timerID: id)
         let removed = await center.removed
         XCTAssertEqual(removed, ["timer-\(id.uuidString)"])
-        XCTAssertEqual(controller.route(actionIdentifier: "STOP", requestIdentifier: "timer-\(id.uuidString)", savedDuration: 90, snoozePreference: 2), .stop(id))
-        XCTAssertEqual(controller.route(actionIdentifier: "REPEAT", requestIdentifier: "timer-\(id.uuidString)", savedDuration: 90, snoozePreference: 2), .repeatTimer(id, duration: 90))
-        XCTAssertEqual(controller.route(actionIdentifier: "SNOOZE", requestIdentifier: "timer-\(id.uuidString)", savedDuration: 90, snoozePreference: 2), .snooze(id, seconds: 60))
-        XCTAssertEqual(controller.route(actionIdentifier: "STOP", requestIdentifier: "bad", savedDuration: 90, snoozePreference: 2), .invalidPayload)
+        XCTAssertEqual(controller.route(actionIdentifier: "STOP", categoryIdentifier: NotificationController.categoryIdentifier, requestIdentifier: "timer-\(id.uuidString)", savedDuration: 90, snoozePreference: 2), .stop(id))
+        XCTAssertEqual(controller.route(actionIdentifier: "REPEAT", categoryIdentifier: NotificationController.categoryIdentifier, requestIdentifier: "timer-\(id.uuidString)", savedDuration: TimerLimits.maximumDuration + 1, snoozePreference: 2), .invalidPayload)
+        XCTAssertEqual(controller.route(actionIdentifier: "SNOOZE", categoryIdentifier: "wrong", requestIdentifier: "timer-\(id.uuidString)", savedDuration: 90, snoozePreference: 2), .invalidPayload)
     }
 }
 

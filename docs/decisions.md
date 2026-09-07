@@ -25,6 +25,25 @@ tie-breaker; pending notification inspection has a 4,096-request safety cap.
 different snooze limits, or a different fallback sound require matching UI,
 storage, and regression-test changes.
 
+## 2026-09-07 — Notification replacement and sound-file handles
+
+**Decision:** Rescheduling an existing timer replaces only its own pending
+request; capacity eviction is calculated on unique post-add request IDs.
+Over-capacity recovery removes the required oldest TopTimer requests, never
+unrelated requests. Notification actions require the TopTimer category and a
+valid timer UUID. Sound imports open the source once without following links,
+validate and copy from that same descriptor, and create destination files
+exclusively. Timer durations, including Repeat actions, are bounded to one year.
+
+**Why:** These rules prevent replacement from evicting another timer, reject
+forged notification payloads, and close path-based time-of-check/time-of-use
+races during local file import.
+
+**If the client answers differently:** Changing the duration limit or allowing
+replacement to consume another timer's capacity would require domain and
+notification compatibility changes; allowing links needs an explicit secure
+file-provider policy.
+
 ## 2026-09-04 — Native macOS implementation
 
 **Decision:** Build TopTimer with SwiftUI and small AppKit integration points,

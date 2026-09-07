@@ -27,7 +27,7 @@ let package = Package(
             name: "TopTimerPersistence",
             dependencies: ["TopTimerDomain"]
         ),
-        .target(name: "TopTimerSystem"),
+        .target(name: "TopTimerSystem", dependencies: ["TopTimerDomain"]),
         .testTarget(
             name: "TopTimerDomainTests",
             dependencies: ["TopTimerDomain"]
@@ -38,7 +38,7 @@ let package = Package(
         ),
         .testTarget(
             name: "TopTimerSystemTests",
-            dependencies: ["TopTimerSystem"]
+            dependencies: ["TopTimerSystem", "TopTimerDomain"]
         )
     ]
 )
