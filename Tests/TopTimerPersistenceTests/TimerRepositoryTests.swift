@@ -46,6 +46,32 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertEqual(values.first?.command, "Timer 0")
     }
 
+    func testDueReturnsOnlyRunningCountdownsInDeadlineAndIdentityOrderWithHardBound() async throws {
+        let repository = try await repository()
+        let tick = created.addingTimeInterval(1_000)
+        let idle = try countdown(); _ = try await repository.insert(idle)
+        var paused = try countdown(); try paused.start(at: created); _ = try await repository.insert(paused); try paused.pause(at: created.addingTimeInterval(1)); try await repository.update(paused)
+        var watch = try TimerItem.stopwatch(title: "Watch", createdAt: created); try watch.start(at: created); _ = try await repository.insert(watch)
+        var future = try countdown(); try future.start(at: created.addingTimeInterval(2_000)); _ = try await repository.insert(future)
+        var deleted = try countdown(); try deleted.start(at: created); _ = try await repository.insert(deleted); try await repository.softDelete(deleted.id, at: tick)
+
+        var expected: [TimerItem] = []
+        for index in 0 ..< 105 {
+            let id = UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", index + 1))!
+            var timer = try countdown(id: id, occurrenceID: UUID())
+            try timer.start(at: created)
+            _ = try await repository.insert(timer)
+            expected.append(timer)
+        }
+        let due = try await repository.due(at: tick, limit: 200)
+        XCTAssertEqual(due.count, 100)
+        XCTAssertEqual(due.map(\.id), expected.sorted { $0.id.uuidString < $1.id.uuidString }.prefix(100).map(\.id))
+        let clamped = try await repository.due(at: tick, limit: 0)
+        let noDue = try await repository.due(at: .distantPast, limit: 100)
+        XCTAssertEqual(clamped.count, 1)
+        XCTAssertTrue(noDue.isEmpty)
+    }
+
     func testPresetCodecRejectsMalformedEnvelopeUnknownVersionAndSemanticCorruption() throws {
         let date = created
         let preset = try TimerPreset(command: "Focus", tags: ["work"], createdAt: date, lastUsed: date)
