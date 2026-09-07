@@ -7,6 +7,7 @@ public enum TimerRepositoryError: Error, Equatable, Sendable {
     case timerNotFound
     case unsupportedPayloadVersion(Int)
     case malformedPayload
+    case presetUseCountOverflow
     case staleTimerUpdate
     case staleHistoryUpdate
 }

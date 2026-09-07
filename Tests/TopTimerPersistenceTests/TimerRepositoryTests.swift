@@ -46,6 +46,80 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertEqual(values.first?.command, "Timer 0")
     }
 
+    func testPresetCodecRejectsMalformedEnvelopeUnknownVersionAndSemanticCorruption() throws {
+        let date = created
+        let preset = try TimerPreset(command: "Focus", tags: ["work"], createdAt: date, lastUsed: date)
+        let encoded = try PresetPayloadCodec.encode(preset)
+        XCTAssertEqual(try PresetPayloadCodec.decode(encoded), preset)
+        XCTAssertThrowsError(try PresetPayloadCodec.decode(Data("not json".utf8)), "malformed envelope")
+
+        var envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        envelope["version"] = 99
+        XCTAssertThrowsError(try PresetPayloadCodec.decode(JSONSerialization.data(withJSONObject: envelope))) { XCTAssertEqual($0 as? TimerRepositoryError, .unsupportedPayloadVersion(99)) }
+        envelope["version"] = 1
+        envelope["unexpected"] = true
+        XCTAssertThrowsError(try PresetPayloadCodec.decode(JSONSerialization.data(withJSONObject: envelope))) { XCTAssertEqual($0 as? TimerRepositoryError, .malformedPayload) }
+        envelope.removeValue(forKey: "unexpected")
+
+        let corruptions: [(String, (inout [String: Any]) -> Void)] = [
+            ("empty command", { $0["command"] = "   " }),
+            ("wrong key", { $0["commandKey"] = "wrong" }),
+            ("unnormalized tags", { $0["tags"] = ["Work", "work"] }),
+            ("zero uses", { $0["useCount"] = 0 }),
+            ("last used before creation", { $0["lastUsed"] = 0 }),
+            ("delete before use", { $0["deletedAt"] = 0 }),
+            ("unknown field", { $0["extra"] = true })
+        ]
+        let payload = try XCTUnwrap(envelope["payload"] as? String)
+        for (name, mutate) in corruptions {
+            var raw = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(Data(base64Encoded: payload))) as? [String: Any])
+            mutate(&raw)
+            var badEnvelope = envelope
+            badEnvelope["version"] = 1
+            badEnvelope["payload"] = try JSONSerialization.data(withJSONObject: raw).base64EncodedString()
+            XCTAssertThrowsError(try PresetPayloadCodec.decode(JSONSerialization.data(withJSONObject: badEnvelope)), name) { XCTAssertEqual($0 as? TimerRepositoryError, .malformedPayload, name) }
+        }
+    }
+
+    func testPresetUpsertOverflowRollsBackRawRecord() async throws {
+        let fixture = try await sqliteFixture()
+        defer { fixture.removeFiles() }
+        let preset = try TimerPreset(command: "Focus", tags: ["work"], useCount: UInt.max, createdAt: created, lastUsed: created)
+        try await fixture.store.perform { context in
+            let record = PresetRecord(context: context)
+            record.id = preset.id; record.createdAt = preset.createdAt; record.deletedAt = nil; record.payload = try PresetPayloadCodec.encode(preset)
+            try context.save()
+        }
+        let repository = PresetCoreDataRepository(store: fixture.store)
+        do {
+            _ = try await repository.record(command: "focus", tags: ["work"], at: completed)
+            XCTFail("Expected overflow")
+        } catch { XCTAssertEqual(error as? TimerRepositoryError, .presetUseCountOverflow) }
+        let values = try await repository.suggestions(query: "work", limit: 20)
+        XCTAssertEqual(values, [preset])
+    }
+
+    func testPresetNormalizationIsSortedAndLocaleIndependent() throws {
+        let preset = try TimerPreset(command: "  İSTANBUL  ", tags: ["Zebra", "ápple", "zebra"], createdAt: created, lastUsed: created)
+        XCTAssertEqual(preset.command, "İSTANBUL")
+        XCTAssertEqual(preset.commandKey, TimerPreset.key("İSTANBUL"))
+        XCTAssertEqual(preset.tags, ["apple", "zebra"])
+    }
+
+    func testPresetSoftDeleteAndRecoveryAreIdempotent() async throws {
+        let repository = PresetCoreDataRepository(store: try await CoreDataStore.inMemory())
+        let preset = try await repository.record(command: "Focus", tags: ["work"], at: created)
+        try await repository.softDeletePreset(preset.id, at: completed)
+        try await repository.softDeletePreset(preset.id, at: completed.addingTimeInterval(1))
+        let deletedSuggestions = try await repository.suggestions(query: "", limit: 20)
+        XCTAssertTrue(deletedSuggestions.isEmpty)
+        try await repository.recoverPreset(preset.id)
+        try await repository.recoverPreset(preset.id)
+        let values = try await repository.suggestions(query: "", limit: 20)
+        XCTAssertEqual(values.count, 1)
+        XCTAssertEqual(values.first?.id, preset.id)
+    }
+
     func testInsertAcceptsOnlyIdleRootsAndFreshlyStartedRoots() async throws {
         let repository = try await repository()
         let idle = try countdown()
