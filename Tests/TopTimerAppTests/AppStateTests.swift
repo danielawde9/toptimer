@@ -7,6 +7,16 @@ import TopTimerSystem
 
 @MainActor
 final class AppStateTests: XCTestCase {
+    func testDuplicatePersistsStartsSchedulesThenPublishes() async throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let timer = try idleCountdown(at: now)
+        let recorder = OperationRecorder(); let repository = RecordingRepository(recorder: recorder); await repository.seed(timer)
+        let state = AppState(repository: repository, notifications: RecordingNotifications(recorder: recorder), now: { now })
+        let succeeded = await state.duplicate(timer.id)
+        XCTAssertTrue(succeeded)
+        let operations = await recorder.operations()
+        XCTAssertEqual(operations, ["timer", "persist", "schedule", "publish"])
+    }
     func testObservableStatePublishesTimerErrorAndSuggestionMutationsOnMainActor() async {
         let state = AppState(repository: RecordingRepository(), notifications: RecordingNotifications(), presets: RecordingPresets())
         var publicationCount = 0

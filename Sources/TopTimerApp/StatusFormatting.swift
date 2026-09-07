@@ -30,4 +30,4 @@ public enum StatusTitleFormatter {
     }
 }
 
-public enum StatusDisplayMode: Sendable { case compact, seconds, clock }
+public enum StatusDisplayMode: Sendable, Equatable { case compact, seconds, clock }

@@ -88,8 +88,24 @@ public final class AppState: ObservableObject {
             _ = try? await presets?.record(command: command, tags: parsed.tags, at: submittedAt)
             quickEntryText = ""
             await refreshSuggestions(query: "")
+        } catch let error as TimerParserError {
+            inlineError = Self.message(for: error)
         } catch {
-            inlineError = "Could not create timer."
+            inlineError = "Could not create timer. Check local storage and try again."
+        }
+    }
+
+    public static func message(for error: TimerParserError) -> String {
+        switch error {
+        case .inputTooLong: return "Entry is too long. Keep it under 2,048 characters."
+        case .invalidFormat: return "Start with a duration such as 15m or 1h 30m."
+        case .invalidNumber, .nonFiniteValue: return "Use a valid number in the timer duration."
+        case .unsupportedSuffix: return "Use seconds, minutes, hours, or days (s, m, h, d)."
+        case .duplicateUnit: return "Use each duration unit only once."
+        case .negativeValue, .nonPositiveDuration: return "Duration must be greater than zero."
+        case .durationTooLong: return "Duration must be one year or less."
+        case .invalidWallClock: return "Use a valid time after @, such as @14:30."
+        case .malformedTag: return "Tags use one #name with no spaces."
         }
     }
 
@@ -153,6 +169,16 @@ public final class AppState: ObservableObject {
             try await self.notifications.cancel(timerID: id)
             await self.scheduleAfterPersistence(timer)
         })
+    }
+
+    /// Duplicates through the domain factory, then persists before publishing.
+    @discardableResult public func duplicate(_ id: UUID) async -> Bool {
+        do {
+            let date = now(); let source = try await repository.timer(id: id)
+            var copy = try source.duplicate(at: date); try copy.start(at: date)
+            let persisted = try await repository.insert(copy)
+            await scheduleAfterPersistence(persisted); await publishActive(); return true
+        } catch { inlineError = "Could not duplicate timer."; return false }
     }
 
     /// Recovers the repository's supported history record; active timers are not recovered.
@@ -225,6 +251,8 @@ public final class AppState: ObservableObject {
 }
 
 public struct AppPreferences: Equatable, Sendable {
+    public var statusDisplayMode: StatusDisplayMode = .compact
+    public var showsStatusIcon = true
     public var snoozeSeconds: TimeInterval {
         didSet { snoozeSeconds = Self.clamped(snoozeSeconds) }
     }
