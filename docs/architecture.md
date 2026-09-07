@@ -79,8 +79,16 @@ occurrence.
 
 ## Packaging boundary
 
-`scripts/package-app.sh` performs a strict release build, generates original icon
-art with Core Graphics, assembles only `build/TopTimer.app`, ad-hoc signs it, and
-calls `scripts/verify-app.sh`. The verifier checks the executable, property list,
-agent-app identity, icon, and signature. Developer ID signing, notarization,
-publishing, and deployment remain owner-controlled release work.
+`scripts/package-app.sh` performs a strict release build; SwiftPM owns its normal
+`.build` compiler intermediates and products. Packaging generates original icon art
+with Core Graphics and assembles, signs, and verifies a candidate in one explicit
+temporary child of the repository's `build` directory. Only after the candidate is
+verified does the script move any prior final bundle to an exact same-volume backup,
+publish the candidate as `build/TopTimer.app`, and remove that backup. Cleanup restores
+the backup if publication fails before the new destination exists.
+
+The verifier checks the complete release plist contract, a Mach-O executable with
+supported architecture, a structurally valid ICNS, and a strict ad-hoc signature.
+The current local executable is Apple silicon (`arm64`) only; the project does not
+claim an Intel build. Developer ID signing, notarization, publishing, and deployment
+remain owner-controlled release work.

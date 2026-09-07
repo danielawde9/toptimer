@@ -3,6 +3,23 @@
 This ledger is append-only. Later changes supersede earlier entries rather than
 rewriting history.
 
+## 2026-09-07 — Transactional package publication and architecture
+
+**Decision:** Assemble, sign, and fully verify a release candidate in a bounded
+same-volume temporary directory before replacing the exact final
+`build/TopTimer.app`. Preserve an existing verified bundle until the candidate is
+accepted and restore its exact backup if publication fails. The locally produced
+1.0.0 artifact is documented as Apple silicon (`arm64`) only.
+
+**Why:** A late icon, signing, or contract failure must never destroy the last good
+local package. Architecture support is an artifact fact and must not imply an Intel
+build that was neither produced nor tested. SwiftPM continues to own its normal
+intermediate output under `.build`.
+
+**If the client answers differently:** Universal distribution requires an actual
+`x86_64` build, a verified universal merge, and runtime testing on Intel hardware;
+different package destinations require a new exact-path and rollback policy.
+
 ## 2026-09-07 — Local packaging and distribution boundary
 
 **Decision:** Package the strict SwiftPM release executable only as

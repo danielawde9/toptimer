@@ -25,7 +25,19 @@ if [[ "${destination}" != "${default_destination}" ]]; then
 fi
 
 temporary_directory="$(/usr/bin/mktemp -d "${build_root}/.package.XXXXXX")"
+candidate="${temporary_directory}/TopTimer.app"
+backup="${temporary_directory}/Previous-TopTimer.app"
+published=0
 cleanup() {
+  if [[ -d "${backup}" && "${published}" -ne 1 ]]; then
+    if [[ -e "${destination}" ]]; then
+      echo "Previous TopTimer.app preserved at ${backup}; destination appeared concurrently" >&2
+      return
+    elif ! /bin/mv "${backup}" "${destination}"; then
+      echo "Could not restore previous TopTimer.app; preserved at ${backup}" >&2
+      return
+    fi
+  fi
   /bin/rm -rf "${temporary_directory}"
 }
 trap cleanup EXIT
@@ -34,13 +46,30 @@ cd "${repo_root}"
 /usr/bin/swift build -c release -Xswiftc -warnings-as-errors
 binary_directory="$(/usr/bin/swift build -c release --show-bin-path)"
 
-/bin/rm -rf "${default_destination}"
-/bin/mkdir -p "${destination}/Contents/MacOS" "${destination}/Contents/Resources"
-/bin/cp "${binary_directory}/TopTimer" "${destination}/Contents/MacOS/TopTimer"
-/bin/chmod 755 "${destination}/Contents/MacOS/TopTimer"
-/bin/cp "${repo_root}/Sources/TopTimerApp/Resources/Info.plist" "${destination}/Contents/Info.plist"
+/bin/mkdir -p "${candidate}/Contents/MacOS" "${candidate}/Contents/Resources"
+/bin/cp "${binary_directory}/TopTimer" "${candidate}/Contents/MacOS/TopTimer"
+/bin/chmod 755 "${candidate}/Contents/MacOS/TopTimer"
+/bin/cp "${repo_root}/Sources/TopTimerApp/Resources/Info.plist" "${candidate}/Contents/Info.plist"
 /usr/bin/swift "${repo_root}/scripts/generate-icon.swift" "${temporary_directory}"
-/bin/cp "${temporary_directory}/TopTimer.icns" "${destination}/Contents/Resources/TopTimer.icns"
+/bin/cp "${temporary_directory}/TopTimer.icns" "${candidate}/Contents/Resources/TopTimer.icns"
 
-/usr/bin/codesign --force --deep --sign - "${destination}"
-/bin/bash "${repo_root}/scripts/verify-app.sh" "${destination}"
+/usr/bin/codesign --force --deep --sign - "${candidate}"
+/bin/bash "${repo_root}/scripts/verify-app.sh" "${candidate}"
+
+if [[ "${TOPTIMER_TEST_FAIL_AFTER_CANDIDATE_VERIFY:-0}" == "1" ]]; then
+  echo "Forced failure after candidate verification" >&2
+  exit 75
+fi
+
+if [[ -e "${destination}" ]]; then
+  /bin/mv "${destination}" "${backup}"
+fi
+if ! /bin/mv "${candidate}" "${destination}"; then
+  if [[ -d "${backup}" && ! -e "${destination}" ]]; then
+    /bin/mv "${backup}" "${destination}"
+  fi
+  echo "Could not publish verified TopTimer.app" >&2
+  exit 1
+fi
+published=1
+/bin/rm -rf "${backup}"

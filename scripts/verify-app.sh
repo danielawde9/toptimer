@@ -48,18 +48,82 @@ if ! /usr/bin/plutil -lint "${plist_path}" >/dev/null; then
   exit 1
 fi
 
-if [[ "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "${plist_path}" 2>/dev/null)" != "true" ]]; then
+plist_value() {
+  /usr/libexec/PlistBuddy -c "Print :$1" "${plist_path}" 2>/dev/null
+}
+
+if [[ "$(plist_value CFBundleExecutable)" != "TopTimer" ]]; then
+  echo "CFBundleExecutable must be TopTimer" >&2
+  exit 1
+fi
+
+if [[ "$(plist_value CFBundleIconFile)" != "TopTimer" ]]; then
+  echo "CFBundleIconFile must be TopTimer" >&2
+  exit 1
+fi
+
+if [[ "$(plist_value CFBundlePackageType)" != "APPL" ]]; then
+  echo "CFBundlePackageType must be APPL" >&2
+  exit 1
+fi
+
+if [[ "$(plist_value CFBundleShortVersionString)" != "1.0.0" ]]; then
+  echo "CFBundleShortVersionString must be 1.0.0" >&2
+  exit 1
+fi
+
+if [[ "$(plist_value CFBundleVersion)" != "1" ]]; then
+  echo "CFBundleVersion must be 1" >&2
+  exit 1
+fi
+
+if [[ "$(plist_value LSMinimumSystemVersion)" != "13.5" ]]; then
+  echo "LSMinimumSystemVersion must be 13.5" >&2
+  exit 1
+fi
+
+if [[ "$(plist_value LSUIElement)" != "true" ]]; then
   echo "LSUIElement must be true" >&2
   exit 1
 fi
 
-if [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${plist_path}" 2>/dev/null)" != "com.lelabodigital.TopTimer" ]]; then
-  echo "Unexpected bundle identifier" >&2
+if [[ "$(plist_value CFBundleIdentifier)" != "com.lelabodigital.TopTimer" ]]; then
+  echo "CFBundleIdentifier must be com.lelabodigital.TopTimer" >&2
   exit 1
 fi
 
-if [[ ! -f "${icon_path}" ]]; then
-  echo "TopTimer icon missing" >&2
+executable_description="$(/usr/bin/file -b "${executable_path}")"
+if [[ "${executable_description}" != *"Mach-O"* ]]; then
+  echo "TopTimer executable must be Mach-O" >&2
+  exit 1
+fi
+
+architectures="$(/usr/bin/lipo -archs "${executable_path}" 2>/dev/null)"
+if [[ -z "${architectures}" ]]; then
+  echo "TopTimer executable has no supported architecture" >&2
+  exit 1
+fi
+for architecture in ${architectures}; do
+  case "${architecture}" in
+    arm64|x86_64) ;;
+    *)
+      echo "TopTimer executable has unsupported architecture: ${architecture}" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ ! -s "${icon_path}" ]]; then
+  echo "TopTimer icon must be a nonempty valid ICNS file" >&2
+  exit 1
+fi
+icon_test_root="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/toptimer-icon-verify.XXXXXX")"
+cleanup_icon_test() {
+  /bin/rm -rf "${icon_test_root}"
+}
+trap cleanup_icon_test EXIT
+if ! /usr/bin/iconutil -c iconset "${icon_path}" -o "${icon_test_root}/TopTimer.iconset" >/dev/null 2>&1; then
+  echo "TopTimer icon must be a nonempty valid ICNS file" >&2
   exit 1
 fi
 

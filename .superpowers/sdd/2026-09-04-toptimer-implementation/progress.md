@@ -11,6 +11,10 @@
 - Task 12: packaging implementation and automated/install verification complete from
   base `19c9166`; native human-flow and VoiceOver acceptance remain unclaimed because
   the available UI automation surface could not attach to the running LSUIElement app.
+- Task 12 fix round 1: complete. The full bundle contract is adversarially tested,
+  package publication preserves the previous verified artifact across a forced late
+  failure, the local artifact is accurately documented as arm64-only, and 256 tests,
+  strict release, two package runs, reinstall, and single-process proof passed.
 
 ## Resume ruling
 

@@ -20,7 +20,8 @@ sound, and history data on your Mac.
 - Configure global shortcuts, launch at login, clock format, menu-bar display,
   retention, snooze duration, and prevention of idle sleep while timers run.
 
-TopTimer requires macOS 13.5 or later.
+TopTimer requires macOS 13.5 or later. The local package produced by this repository
+is currently Apple silicon (`arm64`) only; no Intel (`x86_64`) binary is claimed.
 
 ## Quick syntax
 
@@ -63,7 +64,10 @@ bash scripts/verify-app.sh build/TopTimer.app
 ```
 
 Both scripts resolve the repository independently, so they can be invoked from any
-working directory. Packaging writes only `build/TopTimer.app`.
+working directory. SwiftPM writes compiler intermediates and products under `.build`.
+The packaging script publishes, replaces, and removes only the final
+`build/TopTimer.app` bundle; its generated candidate uses a bounded temporary child
+inside `build` and is removed after publishing or failure.
 
 ## Install and uninstall
 
