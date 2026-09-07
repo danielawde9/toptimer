@@ -101,6 +101,41 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(operations, ["persist", "schedule", "publish"])
     }
 
+    func testTransitionClassesUseOneSharedCrossBoundaryOrderLog() async throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let cases: [(TimerItem, (AppState, UUID) async -> Bool, [String])] = [
+            (try runningCountdown(at: now), { await $0.pause($1) }, ["timer", "update", "cancelNotification", "publish"]),
+            (try idleCountdown(at: now), { await $0.start($1) }, ["timer", "update", "schedule", "publish"]),
+            (try runningCountdown(at: now), { await $0.edit($1, title: "Edited", details: "", tags: []) }, ["timer", "update", "cancelNotification", "schedule", "publish"]),
+            (try pausedCountdown(at: now), { await $0.resume($1) }, ["timer", "update", "schedule", "publish"]),
+            (try runningCountdown(at: now), { await $0.restart($1) }, ["timer", "update", "schedule", "publish"]),
+            (try completedCountdown(at: now.addingTimeInterval(-300)), { await $0.acknowledge($1) }, ["timer", "update", "cancelNotification", "publish"]),
+            (try runningCountdown(at: now), { await $0.softDelete($1) }, ["softDelete", "cancelNotification", "publish"]),
+            (try runningCountdown(at: now), { await $0.cancel($1) }, ["cancel", "cancelNotification", "publish"])
+        ]
+        for (timer, action, expected) in cases {
+            let recorder = OperationRecorder(); let repository = RecordingRepository(recorder: recorder); await repository.seed(timer)
+            let state = AppState(repository: repository, notifications: RecordingNotifications(recorder: recorder), now: { now })
+            let succeeded = await action(state, timer.id)
+            XCTAssertTrue(succeeded)
+            let operations = await recorder.operations()
+            XCTAssertEqual(operations, expected)
+        }
+        var recurring = try TimerItem.countdown(title: "Recurring", duration: 60, recurrence: .interval(seconds: 300), createdAt: now); try recurring.start(at: now)
+        let completeLog = OperationRecorder(); let completeRepository = RecordingRepository(recorder: completeLog); await completeRepository.seed(recurring)
+        let completeState = AppState(repository: completeRepository, notifications: RecordingNotifications(recorder: completeLog), now: { now.addingTimeInterval(60) })
+        let completed = await completeState.complete(recurring.id)
+        XCTAssertTrue(completed)
+        let completeOperations = await completeLog.operations()
+        XCTAssertEqual(completeOperations, ["complete", "schedule", "publish"])
+
+        let recoveryLog = OperationRecorder(); let recoveryState = AppState(repository: RecordingRepository(recorder: recoveryLog), notifications: RecordingNotifications(recorder: recoveryLog))
+        let recovered = await recoveryState.recoverHistory(UUID())
+        XCTAssertTrue(recovered)
+        let recoveryOperations = await recoveryLog.operations()
+        XCTAssertEqual(recoveryOperations, ["recover", "publish"])
+    }
+
     func testCreationStillPublishesPersistedTimerWhenSchedulingFails() async {
         let repository = RecordingRepository()
         let notifications = RecordingNotifications(failSchedule: true)
@@ -390,7 +425,7 @@ actor RecordingRepository: TimerRepository {
         timers[timer.id] = timer
         return timer
     }
-    func update(_ timer: TimerItem) async throws { try record("update"); timers[timer.id] = timer }
+    func update(_ timer: TimerItem) async throws { try record("update"); await recorder?.record("update"); timers[timer.id] = timer }
     func active(limit: Int) async throws -> [TimerItem] {
         try record("publish")
         await recorder?.record("publish")
@@ -406,6 +441,7 @@ actor RecordingRepository: TimerRepository {
     func activePage(limit: Int, after: TimerPageCursor?) async throws -> TimerPage { .init(timers: try await active(limit: limit), nextCursor: nil) }
     func complete(_ id: UUID, at date: Date) async throws -> CompletionOutcome {
         try record("complete")
+        await recorder?.record("complete")
         guard let timer = timers[id] else { throw TimerRepositoryError.timerNotFound }
         let outcome = try RecurrenceService().complete(timer, at: date)
         timers[id] = outcome.completed
@@ -414,24 +450,26 @@ actor RecordingRepository: TimerRepository {
     }
     func cancel(id: UUID, at date: Date) async throws -> TimerItem {
         try record("cancel")
+        await recorder?.record("cancel")
         guard var timer = timers[id] else { throw TimerRepositoryError.timerNotFound }
         try timer.cancel(at: date); timers[id] = timer; return timer
     }
     func softDelete(_ id: UUID, at date: Date) async throws {
         try record("softDelete")
+        await recorder?.record("softDelete")
         guard var timer = timers[id] else { throw TimerRepositoryError.timerNotFound }
         try timer.softDelete(at: date); timers[id] = timer
     }
     func historyPage(from: Date?, through: Date?, query: String, limit: Int, after: HistoryPageCursor?) async throws -> HistoryPage { .init(entries: [], nextCursor: nil) }
     func updateHistory(_ history: HistoryEntry) async throws {}
     func softDeleteHistory(_ id: UUID, at: Date) async throws {}
-    func recoverHistory(_ id: UUID) async throws {}
+    func recoverHistory(_ id: UUID) async throws { await recorder?.record("recover") }
     func purgeHistory(endedBefore: Date) async throws -> Int { 0 }
     func historyCount(for: UUID, limit: Int) async throws -> Int { 0 }
     func successors(of occurrenceID: UUID, limit: Int) async throws -> [TimerItem] {
         Array(timers.values.filter { $0.predecessorOccurrenceID == occurrenceID }.prefix(limit))
     }
-    func timer(id: UUID) async throws -> TimerItem { try record("timer"); guard let timer = timers[id] else { throw TimerRepositoryError.timerNotFound }; return timer }
+    func timer(id: UUID) async throws -> TimerItem { try record("timer"); await recorder?.record("timer"); guard let timer = timers[id] else { throw TimerRepositoryError.timerNotFound }; return timer }
     func recordedOperations() -> [String] { operations }
     func activeLimits() -> [Int] { requestedActiveLimits }
     func suspendNextActive() { activeDelay = true }
@@ -448,7 +486,7 @@ actor RecordingNotifications: TimerNotificationScheduling {
     private let recorder: OperationRecorder?
     init(failSchedule: Bool = false, recorder: OperationRecorder? = nil) { self.failSchedule = failSchedule; self.recorder = recorder }
     func schedule(_ timer: TimerItem) async throws -> NotificationScheduleStatus { operations.append("schedule"); await recorder?.record("schedule"); if failSchedule { throw TimerRepositoryError.invalidCreation }; return .scheduled }
-    func cancel(timerID: UUID) async throws { operations.append("cancel") }
+    func cancel(timerID: UUID) async throws { operations.append("cancel"); await recorder?.record("cancelNotification") }
     func recordedOperations() -> [String] { operations }
 }
 

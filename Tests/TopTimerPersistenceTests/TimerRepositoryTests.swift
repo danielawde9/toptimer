@@ -120,6 +120,48 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertEqual(values.first?.id, preset.id)
     }
 
+    func testDeletingAndCleaningHistoryNeverRemovesItsPreset() async throws {
+        let store = try await CoreDataStore.inMemory()
+        let timers = TimerCoreDataRepository(store: store, calendar: utcCalendar)
+        let presets = PresetCoreDataRepository(store: store)
+        var timer = try countdown()
+        try timer.start(at: created)
+        _ = try await timers.insert(timer)
+        _ = try await timers.complete(timer.id, at: completed)
+        let preset = try await presets.record(command: "Focus 1m", tags: ["work"], at: created)
+        let historyPage = try await timers.historyPage(from: nil, through: nil, query: "", limit: 1, after: nil)
+        let history = try XCTUnwrap(historyPage.entries.first)
+        try await timers.softDeleteHistory(history.id, at: completed)
+        let deletedPage = try await timers.historyPage(from: nil, through: nil, query: "", limit: 10, after: nil)
+        XCTAssertTrue(deletedPage.entries.isEmpty)
+        let purged = try await timers.purgeHistory(endedBefore: completed.addingTimeInterval(1))
+        XCTAssertEqual(purged, 1)
+        let suggested = try await presets.suggestions(query: "work", limit: 20)
+        XCTAssertEqual(suggested, [preset])
+    }
+
+    func testPresetRankingUsesPrefixThenCountThenRecencyThenStableIdentity() async throws {
+        let store = try await CoreDataStore.inMemory()
+        let presets = PresetCoreDataRepository(store: store)
+        let firstID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let secondID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let values = [
+            try TimerPreset(command: "Zed", tags: ["work"], useCount: 1, createdAt: created, lastUsed: completed),
+            try TimerPreset(command: "Alpha", tags: ["other"], useCount: 99, createdAt: created, lastUsed: completed),
+            try TimerPreset(id: secondID, command: "Same", tags: ["work"], useCount: 3, createdAt: created, lastUsed: completed),
+            try TimerPreset(id: firstID, command: "Same", tags: ["work"], useCount: 3, createdAt: created, lastUsed: completed),
+            try TimerPreset(command: "Recent", tags: ["work"], useCount: 3, createdAt: created, lastUsed: completed.addingTimeInterval(1))
+        ]
+        try await store.perform { context in
+            for preset in values { let record = PresetRecord(context: context); record.id = preset.id; record.createdAt = preset.createdAt; record.deletedAt = nil; record.payload = try PresetPayloadCodec.encode(preset) }
+            try context.save()
+        }
+        let ranked = try await presets.suggestions(query: "wo", limit: 20)
+        XCTAssertEqual(ranked.map(\.command), ["Recent", "Same", "Same", "Zed", "Alpha"])
+        XCTAssertEqual(ranked[1].id, firstID)
+        XCTAssertEqual(ranked[2].id, secondID)
+    }
+
     func testInsertAcceptsOnlyIdleRootsAndFreshlyStartedRoots() async throws {
         let repository = try await repository()
         let idle = try countdown()

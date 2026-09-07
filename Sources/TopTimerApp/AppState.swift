@@ -161,7 +161,7 @@ public final class AppState: ObservableObject {
 
     /// Recovers the repository's supported history record; active timers are not recovered.
     @discardableResult public func recoverHistory(_ id: UUID) async -> Bool {
-        do { try await repository.recoverHistory(id); await loadHistory(); return true }
+        do { try await repository.recoverHistory(id); await loadHistory(); await publishActive(); return true }
         catch { inlineError = "Could not recover timer history."; return false }
     }
 
