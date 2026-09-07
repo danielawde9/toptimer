@@ -133,6 +133,30 @@ public final class AppState {
     public func cancel(_ id: UUID) async { do { _ = try await repository.cancel(id: id, at: now()); try? await notifications.cancel(timerID: id); await publishActive() } catch { inlineError = "Could not cancel timer." } }
     public func complete(_ id: UUID) async { do { let outcome = try await repository.complete(id, at: now()); if let successor = outcome.successor { _ = try? await notifications.schedule(successor) }; await publishActive() } catch { inlineError = "Could not complete timer." } }
 
+    /// NotificationController performs category and payload validation before
+    /// this boundary is called; invalid values intentionally have no effects.
+    public func handle(notificationAction action: TimerNotificationAction) async {
+        switch action {
+        case let .stop(id): await cancel(id)
+        case let .repeatTimer(id, duration): await createActionTimer(from: id, duration: duration)
+        case let .snooze(id, seconds): await createActionTimer(from: id, duration: seconds)
+        case .invalidPayload: return
+        }
+    }
+
+    private func createActionTimer(from id: UUID, duration: TimeInterval) async {
+        guard duration.isFinite, duration > 0, duration <= TimerLimits.maximumDuration else { return }
+        do {
+            let source = try await repository.timer(id: id)
+            let date = now()
+            var timer = try TimerItem.countdown(title: source.title, duration: duration, details: source.details, tags: source.tags, createdAt: date)
+            try timer.start(at: date)
+            let persisted = try await repository.insert(timer)
+            notificationStatus = try? await notifications.schedule(persisted)
+            await publishActive()
+        } catch { inlineError = "Could not create timer from notification action." }
+    }
+
     private func update(_ id: UUID, mutation: (inout TimerItem) throws -> Void) async {
         do { var timer = try await repository.timer(id: id); try mutation(&timer); try await repository.update(timer); await publishActive() }
         catch { inlineError = "Could not update timer." }
