@@ -58,6 +58,18 @@ final class AlertSoundControllerTests: XCTestCase {
         try await store.importRegularFile(from: exact, to: directory.appendingPathComponent("copied.wav"), maximumBytes: 20_000_000)
         await XCTAssertThrowsErrorAsync(try await store.importRegularFile(from: over, to: directory.appendingPathComponent("too-big.wav"), maximumBytes: 20_000_000))
     }
+
+    func testLocalStoreRemovesPartialDestinationAfterPostCreateReadFailure() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.wav")
+        let destination = directory.appendingPathComponent("partial.wav")
+        try Data(repeating: 1, count: 100).write(to: source)
+        let store = LocalSoundFileStore(readFailureAfterBytes: 1)
+        await XCTAssertThrowsErrorAsync(try await store.importRegularFile(from: source, to: destination, maximumBytes: 20_000_000))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
 }
 
 actor SoundFileStoreSpy: SoundFileStore {
