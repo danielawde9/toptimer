@@ -14,6 +14,20 @@ final class TimerRepositoryTests: XCTestCase {
         _ = repository
     }
 
+    func testPresetsDeduplicateAndSurviveSQLiteRelaunch() async throws {
+        let fixture = try await sqliteFixture()
+        defer { fixture.removeFiles() }
+        let presets = PresetCoreDataRepository(store: fixture.store)
+        let first = try await presets.record(command: "  Focus 25m ", tags: ["Work", " work "], at: created)
+        let second = try await presets.record(command: "focus 25m", tags: ["WORK"], at: completed)
+        XCTAssertEqual(first.id, second.id)
+        XCTAssertEqual(second.useCount, 2)
+        try await fixture.store.close()
+        let reopened = try await CoreDataStore.sqlite(at: fixture.directory.appendingPathComponent("TopTimer.sqlite"))
+        let recovered = try await PresetCoreDataRepository(store: reopened).suggestions(query: "work", limit: 20)
+        XCTAssertEqual(recovered, [second])
+    }
+
     func testInsertAcceptsOnlyIdleRootsAndFreshlyStartedRoots() async throws {
         let repository = try await repository()
         let idle = try countdown()

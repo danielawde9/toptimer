@@ -306,3 +306,17 @@ reported time, and report generation has an explicit memory bound.
 
 **If the client answers differently:** Display-preserving tag groups require a
 separate canonical-label policy, and larger exports need a streaming API.
+
+## 2026-09-07 — Local timer suggestions
+
+**Decision:** Presets are version-one canonical local payloads, deduplicated by
+normalized command and normalized tag set. Suggestions inspect no more than
+10,000 records, return 1...20 values, and rank tag-prefix matches before use
+count, last use, command key, and identifier.
+
+**Why:** Quick-entry suggestions must survive relaunch without turning a
+convenience feature into unbounded memory or nondeterministic UI state.
+
+**If the client answers differently:** Cross-device suggestions or fuzzy command
+matching need an explicit synchronization/privacy design and a new payload
+version.

@@ -34,17 +34,20 @@ public final class AppState {
 
     private let repository: any TimerRepository
     private let notifications: any TimerNotificationScheduling
+    private let presets: (any PresetRepository)?
     private let now: () -> Date
     private let parser: (Date) -> TimerParser
 
     public init(
         repository: any TimerRepository,
         notifications: any TimerNotificationScheduling,
+        presets: (any PresetRepository)? = nil,
         now: @escaping () -> Date = { .now },
         parser: @escaping (Date) -> TimerParser = { TimerParser(now: $0) }
     ) {
         self.repository = repository
         self.notifications = notifications
+        self.presets = presets
         self.now = now
         self.parser = parser
     }
@@ -70,6 +73,10 @@ public final class AppState {
             try timer.start(at: submittedAt)
             let persisted = try await repository.insert(timer)
 
+            // Presets are a convenience record: a preset write never makes a
+            // successfully persisted timer disappear from the UI.
+            _ = try? await presets?.record(command: command, tags: parsed.tags, at: submittedAt)
+
             if persisted.kind == .countdown {
                 do {
                     notificationStatus = try await notifications.schedule(persisted)
@@ -80,6 +87,7 @@ public final class AppState {
             }
             await publishActive()
             quickEntryText = ""
+            await refreshSuggestions(query: "")
         } catch {
             inlineError = "Could not create timer."
         }
@@ -118,6 +126,13 @@ public final class AppState {
         await publishActive()
         do { historyPage = try await repository.historyPage(from: nil, through: nil, query: "", limit: 100, after: nil) }
         catch { inlineError = "Could not load timer history." }
+        await refreshSuggestions(query: quickEntryText)
+    }
+
+    public func refreshSuggestions(query: String) async {
+        guard let presets else { suggestions = []; return }
+        do { suggestions = try await presets.suggestions(query: query, limit: 20).map { $0.command } }
+        catch { suggestions = [] }
     }
 
     public func selectEditor(_ id: UUID?) async {

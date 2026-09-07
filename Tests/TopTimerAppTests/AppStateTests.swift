@@ -28,6 +28,18 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.activeTimers[0].state, .running)
         XCTAssertNil(state.inlineError)
     }
+
+    func testSuccessfulCreateRecordsAndPublishesRankedPresetSuggestions() async throws {
+        let repository = RecordingRepository()
+        let presets = RecordingPresets()
+        let state = AppState(repository: repository, notifications: RecordingNotifications(), presets: presets, now: { Date(timeIntervalSince1970: 1_000) })
+        await state.create(command: "5m Focus #work")
+        let count = await presets.recordCount()
+        XCTAssertEqual(count, 1)
+        XCTAssertEqual(state.suggestions, ["5m Focus #work"])
+        await state.refreshSuggestions(query: "work")
+        XCTAssertEqual(state.suggestions.count, 1)
+    }
 }
 
 actor RecordingRepository: TimerRepository {
@@ -56,4 +68,17 @@ actor RecordingNotifications: TimerNotificationScheduling {
     func schedule(_ timer: TimerItem) async throws -> NotificationScheduleStatus { operations.append("schedule"); return .scheduled }
     func cancel(timerID: UUID) async throws { operations.append("cancel") }
     func recordedOperations() -> [String] { operations }
+}
+
+actor RecordingPresets: PresetRepository {
+    private var values: [TimerPreset] = []
+    func record(command: String, tags: [String], at: Date) async throws -> TimerPreset {
+        let preset = try TimerPreset(command: command, tags: tags, createdAt: at, lastUsed: at)
+        values = [preset]
+        return preset
+    }
+    func suggestions(query: String, limit: Int) async throws -> [TimerPreset] { Array(values.prefix(min(20, max(1, limit)))) }
+    func softDeletePreset(_ id: UUID, at: Date) async throws {}
+    func recoverPreset(_ id: UUID) async throws {}
+    func recordCount() -> Int { values.count }
 }
