@@ -3,6 +3,25 @@
 This ledger is append-only. Later changes supersede earlier entries rather than
 rewriting history.
 
+## 2026-09-07 — Bounded system integrations
+
+**Decision:** TopTimer owns exactly two application-level global-hotkey slots:
+Quick Entry and Pause/Resume Priority. A replacement registers first, so a
+failed registration leaves the previous shortcut active; duplicate combinations
+are rejected. Launch-at-login exposes the system state without registering on
+read, and a typed error is returned for register or unregister failures. While
+sleep prevention is enabled, TopTimer owns at most one prevent-idle-sleep IOKit
+assertion, acquired only when at least one timer runs and released when none do.
+
+**Why:** Fixed ownership bounds avoid untracked Carbon registrations and power
+assertions, while explicit system status and errors give the later UI a safe,
+recoverable path to explain macOS decisions.
+
+**If the client answers differently:** More global commands need a new bounded
+slot/identifier design and matching preferences UI; a different sleep policy
+would require a user-visible setting and regression tests for its release
+transitions.
+
 ## 2026-09-07 — Timer alert delivery and custom sounds
 
 **Decision:** TopTimer schedules at most 64 notifications in its own
