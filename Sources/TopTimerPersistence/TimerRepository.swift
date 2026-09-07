@@ -10,6 +10,7 @@ public enum TimerRepositoryError: Error, Equatable, Sendable {
     case presetUseCountOverflow
     case presetCapacityReached
     case invalidPresetQuery
+    case duplicatePreset
     case staleTimerUpdate
     case staleHistoryUpdate
 }

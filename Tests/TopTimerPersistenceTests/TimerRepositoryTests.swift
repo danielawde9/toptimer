@@ -120,6 +120,20 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertEqual(values.first?.id, preset.id)
     }
 
+    func testStoredPresetCapKeepsTombstonesVisibleToDedupAndCapacity() async throws {
+        let repository = PresetCoreDataRepository(store: try await CoreDataStore.inMemory(), maximumStoredPresets: 3)
+        let first = try await repository.record(command: "One", tags: [], at: created)
+        _ = try await repository.record(command: "Two", tags: [], at: created)
+        _ = try await repository.record(command: "Three", tags: [], at: created)
+        try await repository.softDeletePreset(first.id, at: completed)
+        let revived = try await repository.record(command: " one ", tags: [], at: completed.addingTimeInterval(1))
+        XCTAssertEqual(revived.id, first.id)
+        do { _ = try await repository.record(command: "Four", tags: [], at: completed); XCTFail("Expected cap") }
+        catch { XCTAssertEqual(error as? TimerRepositoryError, .presetCapacityReached) }
+        let suggestions = try await repository.suggestions(query: "", limit: 20)
+        XCTAssertEqual(suggestions.count, 3)
+    }
+
     func testDeletingAndCleaningHistoryNeverRemovesItsPreset() async throws {
         let store = try await CoreDataStore.inMemory()
         let timers = TimerCoreDataRepository(store: store, calendar: utcCalendar)
