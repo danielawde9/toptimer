@@ -23,7 +23,8 @@ let package = Package(
         .library(
             name: "TopTimerApp",
             targets: ["TopTimerApp"]
-        )
+        ),
+        .executable(name: "TopTimer", targets: ["TopTimerExecutable"])
     ],
     targets: [
         .target(name: "TopTimerDomain"),
@@ -36,6 +37,7 @@ let package = Package(
             name: "TopTimerApp",
             dependencies: ["TopTimerDomain", "TopTimerPersistence", "TopTimerSystem"]
         ),
+        .executableTarget(name: "TopTimerExecutable", dependencies: ["TopTimerApp"]),
         .testTarget(
             name: "TopTimerDomainTests",
             dependencies: ["TopTimerDomain"]

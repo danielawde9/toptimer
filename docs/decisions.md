@@ -3,6 +3,20 @@
 This ledger is append-only. Later changes supersede earlier entries rather than
 rewriting history.
 
+## 2026-09-07 — Menu-bar presentation shell
+
+**Decision:** TopTimer runs as an accessory application with a left-aligned,
+280-point quick-entry popover that expands to a 340-point direct timer list.
+The sole accent is the live tabular timer value; controls use semantic macOS
+colors and SF Symbols, with no custom artwork, cards, gradients, or badges.
+
+**Why:** This preserves fast timer entry while keeping the menu-bar utility
+quiet, legible, original, and recognizably native.
+
+**If the client answers differently:** A branded visual system or broader
+settings/history surface should be designed as a separate UI task rather than
+added to the compact popover.
+
 ## 2026-09-07 — App-state creation durability
 
 **Decision:** AppState parses each quick-entry submission against the clock at
