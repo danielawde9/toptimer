@@ -688,6 +688,28 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertEqual(page.nextCursor, HistoryPageCursor(endedAt: second.endedAt, id: second.id))
     }
 
+    func testHistoryPageScansPastNewerNonmatchingRows() async throws {
+        let repository = try await repository()
+        for offset in 1...201 {
+            let entry = try historyEntry(
+                id: String(format: "00000000-0000-0000-0000-%012d", offset),
+                title: "unrelated",
+                endedAt: completed.addingTimeInterval(Double(201 - offset + 1))
+            )
+            try await repository.insertHistory(entry)
+        }
+        let match = try historyEntry(
+            id: "00000000-0000-0000-0000-000000000999",
+            title: "needle",
+            endedAt: completed
+        )
+        try await repository.insertHistory(match)
+
+        let page = try await repository.historyPage(from: nil, through: nil, query: "needle", limit: 1, after: nil)
+
+        XCTAssertEqual(page.entries.map(\.id), [match.id])
+    }
+
     func testHistoryMetadataEditPreservesIdentityAndSystemTimestamps() async throws {
         let repository = try await repository()
         let original = try historyEntry(id: "00000000-0000-0000-0000-000000000001", title: "Original")

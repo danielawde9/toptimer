@@ -162,6 +162,8 @@ public enum TimerPayloadCodec {
 
 public actor TimerCoreDataRepository: TimerRepository {
     private static let maximumLimit = 200
+    // Search may inspect at most 10,000 raw rows per call; callers continue with the cursor.
+    private static let maximumHistorySearchScan = 10_000
     private let store: CoreDataStore
     private let recurrence: RecurrenceService
 
@@ -347,22 +349,45 @@ public actor TimerCoreDataRepository: TimerRepository {
                 NSSortDescriptor(key: "endedAt", ascending: false),
                 NSSortDescriptor(key: "id", ascending: false)
             ]
-            request.fetchLimit = limit
-            let records = try context.fetch(request)
-            let entries = try records.map { try TimerPayloadCodec.decodeHistory($0.payload) }
-            let matches = entries.filter { Self.matchesSearch($0, query: query) }
-            let nextCursor = try records.last.flatMap { last in
-                let probe = NSFetchRequest<NSManagedObjectID>(entityName: "HistoryRecord")
-                let after = NSPredicate(
-                    format: "endedAt < %@ OR (endedAt == %@ AND id < %@)",
-                    last.endedAt as NSDate, last.endedAt as NSDate, last.id as NSUUID
-                )
-                probe.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [range, after])
-                probe.sortDescriptors = request.sortDescriptors
-                probe.fetchLimit = 1
-                probe.resultType = .managedObjectIDResultType
-                return try context.fetch(probe).isEmpty ? nil : HistoryPageCursor(endedAt: last.endedAt, id: last.id)
+            var matches: [HistoryEntry] = []
+            var scanCursor = cursor
+            var lastScanned: HistoryRecord?
+            var scannedCount = 0
+            var exhausted = false
+            while matches.count < limit && scannedCount < Self.maximumHistorySearchScan {
+                let batchSize = min(Self.maximumLimit, Self.maximumHistorySearchScan - scannedCount)
+                let batchRequest = request.copy() as! NSFetchRequest<HistoryRecord>
+                batchRequest.fetchLimit = batchSize
+                if let scanCursor {
+                    let after = NSPredicate(
+                        format: "endedAt < %@ OR (endedAt == %@ AND id < %@)",
+                        scanCursor.endedAt as NSDate, scanCursor.endedAt as NSDate, scanCursor.id as NSUUID
+                    )
+                    batchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [range, after])
+                }
+                let records = try context.fetch(batchRequest)
+                if records.isEmpty {
+                    exhausted = true
+                    break
+                }
+                for record in records {
+                    lastScanned = record
+                    scannedCount += 1
+                    let entry = try TimerPayloadCodec.decodeHistory(record.payload)
+                    if Self.matchesSearch(entry, query: query) {
+                        matches.append(entry)
+                    }
+                    if matches.count == limit {
+                        break
+                    }
+                }
+                scanCursor = lastScanned.map { HistoryPageCursor(endedAt: $0.endedAt, id: $0.id) }
+                if records.count < batchSize || matches.count == limit {
+                    exhausted = matches.count == limit ? false : records.count < batchSize
+                    break
+                }
             }
+            let nextCursor = exhausted ? nil : lastScanned.map { HistoryPageCursor(endedAt: $0.endedAt, id: $0.id) }
             return HistoryPage(entries: matches, nextCursor: nextCursor)
         }
     }
