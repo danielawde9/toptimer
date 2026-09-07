@@ -20,5 +20,5 @@ private struct PopoverRoot: View { @ObservedObject var state: AppState; @State v
 }
 private struct EditorSheet: View { let timer: TimerItem; @ObservedObject var state: AppState; @State private var draft: EditorDraft
     init(timer: TimerItem, state: AppState) { self.timer = timer; self.state = state; _draft = State(initialValue: EditorDraft(timer: timer)) }
-    var body: some View { TimerEditorView(draft: $draft) { Task { _ = await state.edit(timer.id, title: draft.title, details: draft.details, tags: draft.tags) } } }
+    var body: some View { TimerEditorView(draft: $draft) { configuration in await state.reconfigure(timer.id, configuration: configuration) } }
 }

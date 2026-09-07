@@ -607,9 +607,9 @@ public actor TimerCoreDataRepository: TimerRepository {
         }
         switch (stored.state, incoming.state) {
         case (.idle, .idle), (.paused, .paused):
-            return matchesMetadataUpdate(incoming, from: stored)
+            return matchesMetadataUpdate(incoming, from: stored) || matchesReconfiguration(incoming, from: stored)
         case (.running, .running):
-            return matchesMetadataUpdate(incoming, from: stored) || matchesTransition(incoming, from: stored) { timer, date in
+            return matchesMetadataUpdate(incoming, from: stored) || matchesReconfiguration(incoming, from: stored) || matchesTransition(incoming, from: stored) { timer, date in
                 try timer.restart(at: date)
             }
         case (.idle, .running):
@@ -639,6 +639,15 @@ public actor TimerCoreDataRepository: TimerRepository {
         } catch {
             return false
         }
+    }
+
+    private static func matchesReconfiguration(_ incoming: TimerItem, from stored: TimerItem) -> Bool {
+        guard let date = incoming.lastTransitionAt ?? (incoming.state == .idle ? stored.createdAt : nil) else { return false }
+        do {
+            var expected = stored
+            try expected.reconfigure(title: incoming.title, details: incoming.details, tags: incoming.tags, duration: incoming.duration, recurrence: incoming.recurrence, alertName: incoming.alertName, alertVolume: incoming.alertVolume, at: date)
+            return expected == incoming
+        } catch { return false }
     }
 
     private static func matchesTransition(

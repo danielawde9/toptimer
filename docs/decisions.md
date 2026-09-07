@@ -3,6 +3,20 @@
 This ledger is append-only. Later changes supersede earlier entries rather than
 rewriting history.
 
+## 2026-09-07 — Editor schedule edits
+
+**Decision:** Editing a running countdown replaces its deadline with a new full
+duration from the edit time. Idle and paused countdowns retain their state with
+the new full duration; terminal timers may change metadata and alert settings
+but cannot change their finished schedule.
+
+**Why:** This keeps a visible edit deterministic without silently reviving a
+completed occurrence or preserving a stale deadline after its duration changed.
+
+**If the client answers differently:** Supporting terminal schedule changes
+would require an explicit clone/restart action so history and occurrence links
+remain truthful.
+
 ## 2026-09-07 — Menu-bar presentation shell
 
 **Decision:** TopTimer runs as an accessory application with a left-aligned,

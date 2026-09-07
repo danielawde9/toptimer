@@ -7,6 +7,9 @@ public enum TimerValidationError: Error, Equatable, Sendable {
     case tooManyTags
     case tagTooLong
     case recurrenceUnsupportedForStopwatch
+    case invalidAlertName
+    case invalidAlertVolume
+    case terminalScheduleConfigurationUnsupported
     case invalidRevision
 }
 
@@ -23,6 +26,7 @@ public struct TimerLimits: Sendable {
     public static let details = 500
     public static let tags = 12
     public static let tag = 32
+    public static let alertName = 128
 
     private init() {}
 }
@@ -30,6 +34,20 @@ public struct TimerLimits: Sendable {
 public enum TimerKind: String, Codable, Equatable, Sendable {
     case countdown
     case stopwatch
+}
+
+public struct TimerConfiguration: Equatable, Sendable {
+    public let kind: TimerKind
+    public let title: String
+    public let details: String
+    public let tags: [String]
+    public let duration: TimeInterval?
+    public let recurrence: RecurrenceRule
+    public let alertName: String?
+    public let alertVolume: Double
+    public init(kind: TimerKind, title: String, details: String, tags: [String], duration: TimeInterval?, recurrence: RecurrenceRule, alertName: String?, alertVolume: Double) {
+        self.kind = kind; self.title = title; self.details = details; self.tags = tags; self.duration = duration; self.recurrence = recurrence; self.alertName = alertName; self.alertVolume = alertVolume
+    }
 }
 
 public enum TimerState: String, Codable, Equatable, Sendable {
@@ -78,6 +96,24 @@ private func validateTimerMetadata(title: String, details: String, tags: [String
 
 private func validateRecurrence(_ recurrence: RecurrenceRule) throws {
     try RecurrenceRuleValidator.validate(recurrence)
+}
+
+private func normalizedAlertName(_ alertName: String?) throws -> String? {
+    guard let alertName else { return nil }
+    let normalized = alertName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalized.isEmpty else { return nil }
+    let safe = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+    guard !exceedsLimit(normalized, limit: TimerLimits.alertName),
+          normalized.unicodeScalars.allSatisfy(safe.contains) else {
+        throw TimerValidationError.invalidAlertName
+    }
+    return normalized
+}
+
+private func validateAlert(volume: Double) throws {
+    guard volume.isFinite, (0...1).contains(volume) else {
+        throw TimerValidationError.invalidAlertVolume
+    }
 }
 
 internal enum RecurrenceRuleValidator {
@@ -133,7 +169,7 @@ public struct TimerItem: Codable, Equatable, Sendable {
     public internal(set) var tags: [String]
     public let kind: TimerKind
     public internal(set) var state: TimerState
-    public let duration: TimeInterval?
+    public internal(set) var duration: TimeInterval?
     public internal(set) var remaining: TimeInterval?
     /// Wall-clock seconds spent paused by a stopwatch. Countdown timers keep this at zero.
     public internal(set) var accumulatedPause: TimeInterval
@@ -280,6 +316,8 @@ public struct TimerItem: Codable, Equatable, Sendable {
     ) throws {
         try validateTimerMetadata(title: title, details: details, tags: tags)
         try validateRecurrence(recurrence)
+        let alertName = try normalizedAlertName(alertName)
+        try validateAlert(volume: alertVolume)
         if kind == .stopwatch, recurrence != .none {
             throw TimerValidationError.recurrenceUnsupportedForStopwatch
         }
@@ -331,6 +369,67 @@ public struct TimerItem: Codable, Equatable, Sendable {
         self.title = title
         self.details = details
         self.tags = tags
+    }
+
+    /// Reconfiguration has one durable revision. A running countdown starts a
+    /// fresh full-duration schedule at `at`; paused and idle countdowns retain
+    /// their state with full remaining duration. Terminal schedules cannot be
+    /// changed, but metadata and alert settings remain editable.
+    public mutating func reconfigure(
+        title: String,
+        details: String,
+        tags: [String],
+        duration: TimeInterval?,
+        recurrence: RecurrenceRule,
+        alertName: String?,
+        alertVolume: Double,
+        at: Date
+    ) throws {
+        guard at.timeIntervalSinceReferenceDate.isFinite else { throw TimerValidationError.nonPositiveDuration }
+        try validateTimerMetadata(title: title, details: details, tags: tags)
+        try validateRecurrence(recurrence)
+        let normalizedName = try normalizedAlertName(alertName)
+        try validateAlert(volume: alertVolume)
+        guard kind == .countdown ? duration != nil : duration == nil else {
+            throw TimerValidationError.nonPositiveDuration
+        }
+        if kind == .stopwatch, recurrence != .none {
+            throw TimerValidationError.recurrenceUnsupportedForStopwatch
+        }
+        if kind == .countdown {
+            guard let duration, duration.isFinite, duration >= 1, duration <= TimerLimits.maximumDuration else {
+                throw TimerValidationError.nonPositiveDuration
+            }
+            if [.completed, .acknowledged, .cancelled].contains(state),
+               (duration != self.duration || recurrence != self.recurrence) {
+                throw TimerValidationError.terminalScheduleConfigurationUnsupported
+            }
+        }
+        try preflightRevisionIncrement()
+        var revised = self
+        revised.title = title; revised.details = details; revised.tags = tags
+        revised.recurrence = recurrence; revised.alertName = normalizedName; revised.alertVolume = alertVolume
+        if kind == .countdown, let duration {
+            revised.duration = duration
+            switch state {
+            case .running:
+                revised.remaining = duration; revised.startedAt = at; revised.pausedAt = nil
+                revised.lastTransitionAt = at; revised.deadline = at.addingTimeInterval(duration)
+            case .paused:
+                revised.remaining = duration; revised.deadline = nil; revised.pausedAt = at; revised.lastTransitionAt = at
+            case .idle:
+                revised.remaining = duration; revised.deadline = nil
+            case .completed, .acknowledged, .cancelled:
+                break
+            }
+        }
+        try revised.incrementRevision()
+        self = revised
+    }
+
+    public mutating func reconfigure(_ configuration: TimerConfiguration, at: Date) throws {
+        guard configuration.kind == kind else { throw TimerValidationError.nonPositiveDuration }
+        try reconfigure(title: configuration.title, details: configuration.details, tags: configuration.tags, duration: configuration.duration, recurrence: configuration.recurrence, alertName: configuration.alertName, alertVolume: configuration.alertVolume, at: at)
     }
 
     private enum CodingKeys: String, CodingKey {

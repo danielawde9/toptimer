@@ -2,6 +2,29 @@ import XCTest
 @testable import TopTimerDomain
 
 final class TimerModelsTests: XCTestCase {
+    func testReconfigureRunningCountdownResetsItsScheduleAndRevisionOnce() throws {
+        let created = Date(timeIntervalSince1970: 1_000)
+        var timer = try TimerItem.countdown(title: "Focus", duration: 60, createdAt: created)
+        try timer.start(at: created)
+
+        try timer.reconfigure(
+            title: "Edited",
+            details: "",
+            tags: ["work"],
+            duration: 120,
+            recurrence: .daily(hour: 9, minute: 0),
+            alertName: "chime.wav",
+            alertVolume: 0.4,
+            at: created.addingTimeInterval(10)
+        )
+
+        XCTAssertEqual(timer.title, "Edited")
+        XCTAssertEqual(timer.duration, 120)
+        XCTAssertEqual(timer.remaining, 120)
+        XCTAssertEqual(timer.deadline, created.addingTimeInterval(130))
+        XCTAssertEqual(timer.recurrence, .daily(hour: 9, minute: 0))
+        XCTAssertEqual(timer.revision, 2)
+    }
     func testCountdownRejectsNonPositiveDuration() {
         XCTAssertThrowsError(
             try TimerItem.countdown(title: "Tea", duration: 0)

@@ -170,6 +170,12 @@ public final class AppState: ObservableObject {
             await self.scheduleAfterPersistence(timer)
         })
     }
+    @discardableResult public func reconfigure(_ id: UUID, configuration: TimerConfiguration) async -> Bool {
+        await transition(id, failure: "Could not edit timer.", mutation: { try $0.reconfigure(configuration, at: self.now()) }, effect: { timer in
+            try await self.notifications.cancel(timerID: id)
+            await self.scheduleAfterPersistence(timer)
+        })
+    }
 
     /// Duplicates through the domain factory, then persists before publishing.
     @discardableResult public func duplicate(_ id: UUID) async -> Bool {
