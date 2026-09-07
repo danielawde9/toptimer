@@ -3,6 +3,25 @@
 This ledger is append-only. Later changes supersede earlier entries rather than
 rewriting history.
 
+## 2026-09-07 — App-state creation durability
+
+**Decision:** AppState parses each quick-entry submission against the clock at
+submission time, persists a running timer before attempting notification
+scheduling, and only then refreshes its published active-timer snapshot. A
+notification authorization refusal or scheduling error never rolls back the
+stored timer; instead it is surfaced as recoverable notification status/error.
+The persisted repository is therefore the source of truth after a scheduling
+failure.
+
+**Why:** A local timer must continue to work if macOS notification permission is
+denied or the notification center is temporarily unavailable. This ordering also
+prevents a UI entry from claiming success before durable storage succeeds.
+
+**If the client answers differently:** Treating notification delivery as a
+hard requirement would require a transactional outbox or an explicit delete
+rollback action, plus a recovery screen for timers whose alerts could not be
+scheduled.
+
 ## 2026-09-07 — Bounded system integrations
 
 **Decision:** TopTimer owns exactly two application-level global-hotkey slots:
