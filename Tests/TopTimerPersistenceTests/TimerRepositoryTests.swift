@@ -72,6 +72,32 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertTrue(noDue.isEmpty)
     }
 
+    func testPriorityIgnoresMoreThanOneHundredNonrunningRowsAndFailsClosedAtCandidateCap() async throws {
+        let repository = try await repository()
+        for _ in 0 ..< 100 { let timer = try countdown(); _ = try await repository.insert(timer) }
+        var countdown = try countdown(); try countdown.start(at: created); _ = try await repository.insert(countdown)
+        var olderWatch = try TimerItem.stopwatch(title: "Older", createdAt: created); try olderWatch.start(at: created); _ = try await repository.insert(olderWatch)
+        var newerWatch = try TimerItem.stopwatch(title: "Newer", createdAt: created); try newerWatch.start(at: created.addingTimeInterval(1)); _ = try await repository.insert(newerWatch)
+        let countdownPriority = try await repository.priority(at: completed)
+        XCTAssertEqual(countdownPriority?.id, countdown.id)
+        try await repository.softDelete(countdown.id, at: completed)
+        let watchPriority = try await repository.priority(at: completed)
+        XCTAssertEqual(watchPriority?.id, olderWatch.id)
+
+        let capped = TimerCoreDataRepository(store: try await CoreDataStore.inMemory(), calendar: utcCalendar, maximumPriorityCandidates: 3)
+        for _ in 0 ..< 4 { var timer = try TimerItem.stopwatch(title: "Watch", createdAt: created); try timer.start(at: created); _ = try await capped.insert(timer) }
+        do { _ = try await capped.priority(at: completed); XCTFail("Expected cap") }
+        catch { XCTAssertEqual(error as? TimerRepositoryError, .priorityCandidateCapacityReached) }
+    }
+
+    func testPresetCapacityInitializerClampsUnsafeValues() async throws {
+        for maximum in [0, Int.min, Int.max] {
+            let repository = PresetCoreDataRepository(store: try await CoreDataStore.inMemory(), maximumStoredPresets: maximum)
+            _ = try await repository.record(command: "One", tags: [], at: created)
+            _ = repository
+        }
+    }
+
     func testPresetCodecRejectsMalformedEnvelopeUnknownVersionAndSemanticCorruption() throws {
         let date = created
         let preset = try TimerPreset(command: "Focus", tags: ["work"], createdAt: date, lastUsed: date)

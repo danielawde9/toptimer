@@ -169,15 +169,17 @@ public enum TimerPayloadCodec {
 
 public actor TimerCoreDataRepository: TimerRepository {
     private static let maximumLimit = 200
-    private static let maximumPriorityCandidates = 10_000
+    private static let defaultMaximumPriorityCandidates = 10_000
     // Search may inspect at most 10,000 raw rows per call; callers continue with the cursor.
     private static let maximumHistorySearchScan = 10_000
     private let store: CoreDataStore
     private let recurrence: RecurrenceService
+    private let maximumPriorityCandidates: Int
 
-    public init(store: CoreDataStore, calendar: Calendar = .autoupdatingCurrent) {
+    public init(store: CoreDataStore, calendar: Calendar = .autoupdatingCurrent, maximumPriorityCandidates: Int = 10_000) {
         self.store = store
         recurrence = RecurrenceService(calendar: calendar)
+        self.maximumPriorityCandidates = min(Self.defaultMaximumPriorityCandidates, max(1, maximumPriorityCandidates))
     }
 
     public func insert(_ timer: TimerItem) async throws -> TimerItem {
@@ -242,13 +244,14 @@ public actor TimerCoreDataRepository: TimerRepository {
 
     public func priority(at date: Date) async throws -> TimerItem? {
         guard date.timeIntervalSinceReferenceDate.isFinite else { return nil }
+        let maximum = maximumPriorityCandidates
         return try await store.perform { context in
             let request = NSFetchRequest<TimerRecord>(entityName: "TimerRecord")
             request.predicate = NSPredicate(format: "deletedAt == nil AND state == %@", TimerState.running.rawValue)
             request.sortDescriptors = [NSSortDescriptor(key: "id", ascending: true)]
-            request.fetchLimit = Self.maximumPriorityCandidates + 1
+            request.fetchLimit = maximum + 1
             let records = try context.fetch(request)
-            guard records.count <= Self.maximumPriorityCandidates else { throw TimerRepositoryError.priorityCandidateCapacityReached }
+            guard records.count <= maximum else { throw TimerRepositoryError.priorityCandidateCapacityReached }
             return TimerPriority.select(from: try records.map { try TimerPayloadCodec.decodeTimer($0.payload) }, at: date)
         }
     }
