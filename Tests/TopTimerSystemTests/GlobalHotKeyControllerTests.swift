@@ -81,6 +81,9 @@ final class GlobalHotKeyControllerTests: XCTestCase {
         XCTAssertEqual(HotKeyEventDecoder.slot(for: .init(signature: GlobalHotKeyController.signature, id: 2)), .pauseResumePriority)
         XCTAssertNil(HotKeyEventDecoder.slot(for: .init(signature: 0, id: 1)))
         XCTAssertNil(HotKeyEventDecoder.slot(for: .init(signature: GlobalHotKeyController.signature, id: 3)))
+        XCTAssertEqual(HotKeyEventStatus.result(for: .init(signature: GlobalHotKeyController.signature, id: 1)), 0)
+        XCTAssertNotEqual(HotKeyEventStatus.result(for: nil), 0)
+        XCTAssertNotEqual(HotKeyEventStatus.result(for: .init(signature: 0, id: 1)), 0)
 
         var deliveries: [HotKeySlot] = []
         let controller = GlobalHotKeyController(registrar: HotKeyRegistrarSpy(), quickEntry: { deliveries.append(.quickEntry); XCTAssertTrue(Thread.isMainThread) }, pauseResumePriority: { deliveries.append(.pauseResumePriority); XCTAssertTrue(Thread.isMainThread) })

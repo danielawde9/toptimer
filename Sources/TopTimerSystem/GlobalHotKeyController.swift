@@ -98,11 +98,28 @@ enum HotKeyEventDecoder {
     }
 }
 
+enum HotKeyEventStatus {
+    static func result(for identifier: HotKeyIdentifier?) -> Int32 {
+        identifier.flatMap(HotKeyEventDecoder.slot) == nil ? Int32(eventNotHandledErr) : Int32(noErr)
+    }
+}
+
+@MainActor private final class CarbonHandlerContext {
+    weak var controller: GlobalHotKeyController?
+
+    func dispatch(_ identifier: HotKeyIdentifier?) -> OSStatus {
+        guard let identifier, let slot = HotKeyEventDecoder.slot(for: identifier) else { return OSStatus(eventNotHandledErr) }
+        Task { @MainActor [weak controller] in controller?.handle(slot) }
+        return noErr
+    }
+}
+
 @MainActor public final class CarbonHotKeyRegistrar: HotKeyRegistrar {
     private var references: [HotKeyToken: EventHotKeyRef] = [:]
     private var nextToken = 0
     private var handler: EventHandlerRef?
-    private weak var controller: GlobalHotKeyController?
+    private let context = CarbonHandlerContext()
+    private var retainedContext: UnsafeMutableRawPointer?
 
     public init() {}
     isolated deinit {
@@ -110,10 +127,14 @@ enum HotKeyEventDecoder {
             if UnregisterEventHotKey(reference) != noErr { assertionFailure("TopTimer could not unregister a retained Carbon hotkey during deinitialization.") }
         }
         references.removeAll()
-        if let handler { RemoveEventHandler(handler) }
+        if let handler {
+            let status = RemoveEventHandler(handler)
+            if status == noErr, let retainedContext { Unmanaged<CarbonHandlerContext>.fromOpaque(retainedContext).release(); self.retainedContext = nil }
+            else if status != noErr { assertionFailure("TopTimer could not remove its Carbon event handler; retaining callback context to avoid use-after-free.") }
+        }
     }
 
-    public func attach(controller: GlobalHotKeyController) { self.controller = controller }
+    public func attach(controller: GlobalHotKeyController) { context.controller = controller }
 
     public func register(_ shortcut: Shortcut, identifier: HotKeyIdentifier) throws -> HotKeyToken {
         try installHandlerIfNeeded()
@@ -137,20 +158,15 @@ enum HotKeyEventDecoder {
     private func installHandlerIfNeeded() throws {
         guard handler == nil else { return }
         var type = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        let pointer = Unmanaged.passRetained(context).toOpaque()
         let status = InstallEventHandler(GetApplicationEventTarget(), { _, event, userData in
-            guard let event, let userData else { return noErr }
-            let registrar = Unmanaged<CarbonHotKeyRegistrar>.fromOpaque(userData).takeUnretainedValue()
-            registrar.route(event)
-            return noErr
-        }, 1, &type, Unmanaged.passUnretained(self).toOpaque(), &handler)
-        guard status == noErr else { throw HotKeyRegistrarError.registrationFailed(status) }
-    }
-
-    private func route(_ event: EventRef) {
-        var eventID = EventHotKeyID()
-        guard GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &eventID) == noErr else { return }
-        let identifier = HotKeyIdentifier(signature: eventID.signature, id: eventID.id)
-        guard let slot = HotKeyEventDecoder.slot(for: identifier) else { return }
-        Task { @MainActor [weak controller] in controller?.handle(slot) }
+            guard let event, let userData else { return OSStatus(eventNotHandledErr) }
+            let context = Unmanaged<CarbonHandlerContext>.fromOpaque(userData).takeUnretainedValue()
+            var eventID = EventHotKeyID()
+            guard GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &eventID) == noErr else { return OSStatus(eventNotHandledErr) }
+            return context.dispatch(.init(signature: eventID.signature, id: eventID.id))
+        }, 1, &type, pointer, &handler)
+        guard status == noErr else { Unmanaged<CarbonHandlerContext>.fromOpaque(pointer).release(); throw HotKeyRegistrarError.registrationFailed(status) }
+        retainedContext = pointer
     }
 }
