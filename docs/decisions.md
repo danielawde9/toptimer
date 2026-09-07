@@ -3,6 +3,21 @@
 This ledger is append-only. Later changes supersede earlier entries rather than
 rewriting history.
 
+## 2026-09-07 — Local packaging and distribution boundary
+
+**Decision:** Package the strict SwiftPM release executable only as
+`build/TopTimer.app`, with a generated original Core Graphics icon, a menu-bar-only
+Info.plist, and an ad-hoc signature verified before installation. The local package
+does not configure GitHub, Developer ID signing, notarization, or publication.
+
+**Why:** One fixed output keeps removal bounded and reproducible while delivering a
+launchable local application. Public distribution requires owner-controlled Apple
+credentials, entitlement review, and a separately approved release destination.
+
+**If the client answers differently:** A distributable binary needs a Developer ID
+and notarization workflow; App Store delivery needs its own provisioning, sandbox,
+entitlement, privacy, and review plan.
+
 ## 2026-09-07 — Editor schedule edits
 
 **Decision:** Editing a running countdown replaces its deadline with a new full

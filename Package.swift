@@ -35,7 +35,8 @@ let package = Package(
         .target(name: "TopTimerSystem", dependencies: ["TopTimerDomain"]),
         .target(
             name: "TopTimerApp",
-            dependencies: ["TopTimerDomain", "TopTimerPersistence", "TopTimerSystem"]
+            dependencies: ["TopTimerDomain", "TopTimerPersistence", "TopTimerSystem"],
+            exclude: ["Resources"]
         ),
         .executableTarget(name: "TopTimerExecutable", dependencies: ["TopTimerApp"]),
         .testTarget(
