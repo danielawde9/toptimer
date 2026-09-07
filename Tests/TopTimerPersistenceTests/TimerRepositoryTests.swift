@@ -28,6 +28,24 @@ final class TimerRepositoryTests: XCTestCase {
         XCTAssertEqual(recovered, [second])
     }
 
+    func testPresetSuggestionsCapAtTwentyAndPreferNormalizedTagPrefixBeforeRecency() async throws {
+        let fixture = try await sqliteFixture()
+        defer { fixture.removeFiles() }
+        let presets = PresetCoreDataRepository(store: fixture.store)
+        for index in 0 ..< 25 {
+            _ = try await presets.record(
+                command: "Timer \(index)",
+                tags: index == 0 ? ["WÓRK"] : ["other"],
+                at: created.addingTimeInterval(TimeInterval(index))
+            )
+        }
+
+        let values = try await presets.suggestions(query: "work", limit: 100)
+
+        XCTAssertEqual(values.count, 20)
+        XCTAssertEqual(values.first?.command, "Timer 0")
+    }
+
     func testInsertAcceptsOnlyIdleRootsAndFreshlyStartedRoots() async throws {
         let repository = try await repository()
         let idle = try countdown()

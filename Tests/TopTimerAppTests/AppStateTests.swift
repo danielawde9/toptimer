@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import TopTimerApp
 import TopTimerDomain
@@ -6,6 +7,25 @@ import TopTimerSystem
 
 @MainActor
 final class AppStateTests: XCTestCase {
+    func testObservableStatePublishesTimerErrorAndSuggestionMutationsOnMainActor() async {
+        let state = AppState(repository: RecordingRepository(), notifications: RecordingNotifications(), presets: RecordingPresets())
+        var publicationCount = 0
+        let subscription = state.objectWillChange.sink { _ in
+            XCTAssertTrue(Thread.isMainThread)
+            publicationCount += 1
+        }
+        defer { subscription.cancel() }
+
+        await state.create(command: "not a timer command")
+        XCTAssertNotNil(state.inlineError)
+        await state.create(command: "")
+        await state.refreshSuggestions(query: "")
+
+        XCTAssertEqual(state.activeTimers.count, 1)
+        XCTAssertLessThanOrEqual(state.suggestions.count, 20)
+        XCTAssertGreaterThanOrEqual(publicationCount, 3)
+    }
+
     func testBlankCommandStartsAndPublishesStopwatchAfterPersistence() async throws {
         let repository = RecordingRepository()
         let notifications = RecordingNotifications()
@@ -41,6 +61,22 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.suggestions.count, 1)
     }
 
+    func testCreatePersistenceFailureDoesNotSchedulePublishOrRecordPreset() async {
+        let repository = RecordingRepository(failInsert: true)
+        let notifications = RecordingNotifications()
+        let presets = RecordingPresets()
+        let state = AppState(repository: repository, notifications: notifications, presets: presets)
+
+        await state.create(command: "5m Focus #work")
+
+        XCTAssertTrue(state.activeTimers.isEmpty)
+        XCTAssertNotNil(state.inlineError)
+        let notificationOperations = await notifications.recordedOperations()
+        let presetCount = await presets.recordCount()
+        XCTAssertEqual(notificationOperations, [])
+        XCTAssertEqual(presetCount, 0)
+    }
+
     func testRefreshUsesItsSuppliedTickRatherThanTheInjectedCreationClock() async throws {
         let repository = RecordingRepository()
         let creation = Date(timeIntervalSince1970: 1_000)
@@ -51,12 +87,60 @@ final class AppStateTests: XCTestCase {
 
         XCTAssertTrue(state.activeTimers.isEmpty)
     }
+
+    func testSQLiteRelaunchRecoversActiveTimerHistoryAndPresetSuggestions() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("TopTimer.sqlite")
+        let created = Date(timeIntervalSince1970: 1_000)
+
+        let firstStore = try await CoreDataStore.sqlite(at: url)
+        let firstRepository = TimerCoreDataRepository(store: firstStore)
+        let first = AppState(
+            repository: firstRepository,
+            notifications: RecordingNotifications(),
+            presets: PresetCoreDataRepository(store: firstStore),
+            now: { created }
+        )
+        await first.create(command: "5m Focus #work")
+        await first.create(command: "1m Done #work")
+        XCTAssertEqual(first.activeTimers.count, 2)
+        let completedID = try XCTUnwrap(first.activeTimers.first { $0.title == "Done" }?.id)
+        await first.refresh(now: created.addingTimeInterval(60))
+        XCTAssertFalse(first.activeTimers.contains { $0.id == completedID })
+        try await firstStore.close()
+
+        let secondStore = try await CoreDataStore.sqlite(at: url)
+        defer { Task { try? await secondStore.close() } }
+        let secondRepository = TimerCoreDataRepository(store: secondStore)
+        let second = AppState(
+            repository: secondRepository,
+            notifications: RecordingNotifications(),
+            presets: PresetCoreDataRepository(store: secondStore),
+            now: { created }
+        )
+        await second.load()
+
+        XCTAssertEqual(second.activeTimers.map(\.title), ["Focus"])
+        XCTAssertEqual(second.historyPage.entries.count, 1)
+        XCTAssertEqual(second.suggestions, ["1m Done #work", "5m Focus #work"])
+        let historyCount = try await secondRepository.historyCount(for: completedID, limit: 100)
+        XCTAssertEqual(historyCount, 1)
+    }
 }
 
 actor RecordingRepository: TimerRepository {
     var operations: [String] = []
     private var timers: [UUID: TimerItem] = [:]
-    func insert(_ timer: TimerItem) async throws -> TimerItem { operations.append("insert"); timers[timer.id] = timer; return timer }
+    private let failInsert: Bool
+    init(failInsert: Bool = false) { self.failInsert = failInsert }
+    func insert(_ timer: TimerItem) async throws -> TimerItem {
+        operations.append("insert")
+        if failInsert { throw TimerRepositoryError.invalidCreation }
+        timers[timer.id] = timer
+        return timer
+    }
     func update(_ timer: TimerItem) async throws { timers[timer.id] = timer }
     func active(limit: Int) async throws -> [TimerItem] {
         return Array(timers.values.filter { $0.state == .idle || $0.state == .running || $0.state == .paused }.prefix(limit))

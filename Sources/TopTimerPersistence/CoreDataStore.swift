@@ -64,7 +64,8 @@ public final class CoreDataStore: @unchecked Sendable {
         }
     }
 
-    func close() async throws {
+    /// Releases the persistent store so another process or app relaunch can open it.
+    public func close() async throws {
         try await perform { context in
             guard let coordinator = context.persistentStoreCoordinator else { return }
             for store in coordinator.persistentStores {
