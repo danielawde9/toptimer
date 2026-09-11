@@ -2,10 +2,11 @@ import AppKit
 import SwiftUI
 
 public enum TopTimerWindow: CaseIterable, Hashable, Sendable {
-  case timerList, history, reports, settings
+  case now, timerList, history, reports, settings
 
   var title: String {
     switch self {
+    case .now: "TopTimer"
     case .timerList: "Timers"
     case .history: "History"
     case .reports: "Reports"
