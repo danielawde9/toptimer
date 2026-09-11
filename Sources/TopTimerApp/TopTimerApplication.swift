@@ -141,8 +141,7 @@ import UserNotifications
         state: state,
         updateHotKey: { [weak self] slot, shortcut in self?.replaceHotKey(shortcut, for: slot) },
         updateLogin: { [weak self] enabled in self?.setLogin(enabled: enabled) },
-        importSound: { url in try await soundController.importSound(from: url).lastPathComponent },
-        requestQuit: { [weak self] in self?.requestQuit() })
+        importSound: { url in try await soundController.importSound(from: url).lastPathComponent })
       let keys = GlobalHotKeyController(
         quickEntry: { [weak controller] in controller?.openFromShortcut() },
         pauseResumePriority: { [weak state] in
@@ -191,7 +190,6 @@ import UserNotifications
       return nil
     } catch { return "Could not use that shortcut. The previous shortcut is unchanged." }
   }
-  private func requestQuit() { NSApp.terminate(nil) }
   private func setLogin(enabled: Bool) -> String? {
     do {
       try loginItem.setEnabled(enabled)

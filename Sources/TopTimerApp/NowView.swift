@@ -6,13 +6,12 @@ public struct NowView: View {
   private let openHistory: () -> Void
   private let openSettings: () -> Void
   private let openTimerList: () -> Void
-  private let requestQuit: () -> Void
   private let focusEntry: Bool
   @FocusState private var entryFocused: Bool
 
-  public init(state: AppState, focusEntry: Bool = false, openHistory: @escaping () -> Void = {}, openSettings: @escaping () -> Void = {}, openTimerList: @escaping () -> Void = {}, requestQuit: @escaping () -> Void = {}) {
+  public init(state: AppState, focusEntry: Bool = false, openHistory: @escaping () -> Void = {}, openSettings: @escaping () -> Void = {}, openTimerList: @escaping () -> Void = {}) {
     self.state = state; self.focusEntry = focusEntry; self.openHistory = openHistory
-    self.openSettings = openSettings; self.openTimerList = openTimerList; self.requestQuit = requestQuit
+    self.openSettings = openSettings; self.openTimerList = openTimerList
   }
 
   public var body: some View {
@@ -20,7 +19,6 @@ public struct NowView: View {
       HStack {
         Text("TopTimer").font(.title2.bold()); Spacer()
         Button("History", action: openHistory); Button("Settings", action: openSettings)
-        Button("Quit", action: requestQuit)
       }
       HStack {
         TextField("Start a timer, e.g. 25m focus", text: $state.quickEntryText)
@@ -89,10 +87,13 @@ public struct NowView: View {
     HStack {
       VStack(alignment: .leading) { Text(timer.title.isEmpty ? "Untitled timer" : timer.title); Text(timer.state == .paused ? "Paused" : "Running").font(.caption) }
       Spacer(); Text(TimerRowTiming(timer: timer, at: .now).text).monospacedDigit()
-      Menu("Actions") {
-        if timer.state == .paused { Button("Resume") { state.perform { _ = await state.resume(timer.id) } } }
-        if timer.state == .running { Button("Pause") { state.perform { _ = await state.pause(timer.id) } } }
-        Button(timer.kind == .stopwatch ? "Finish" : "Stop") { state.perform { _ = await (timer.kind == .stopwatch ? state.complete(timer.id) : state.cancel(timer.id)) } }
+      if timer.state == .paused {
+        Button("Resume") { state.perform { _ = await state.resume(timer.id) } }
+      } else {
+        Button("Pause") { state.perform { _ = await state.pause(timer.id) } }
+      }
+      Button(timer.kind == .stopwatch ? "Finish" : "Stop") {
+        state.perform { _ = await (timer.kind == .stopwatch ? state.complete(timer.id) : state.cancel(timer.id)) }
       }
     }.padding(.vertical, 4)
   }

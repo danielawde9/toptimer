@@ -13,19 +13,17 @@ import TopTimerSystem
   private let updateLogin: (Bool) -> String?
   private let importSound: (URL) async throws -> String
   private var subscriptions = Set<AnyCancellable>()
-  private let requestQuit: () -> Void
   public init(
     state: AppState, updateHotKey: @escaping (HotKeySlot, Shortcut) -> String? = { _, _ in nil },
     updateLogin: @escaping (Bool) -> String? = { _ in nil },
     importSound: @escaping (URL) async throws -> String = { _ in
       throw CocoaError(.fileReadUnsupportedScheme)
-    }, requestQuit: @escaping () -> Void = {}
+    }
   ) {
     self.state = state
     self.updateHotKey = updateHotKey
     self.updateLogin = updateLogin
     self.importSound = importSound
-    self.requestQuit = requestQuit
     super.init()
     item.isVisible = true
     item.button?.isHidden = false
@@ -52,8 +50,7 @@ import TopTimerSystem
       NowView(state: self!.state, focusEntry: focusEntry,
         openHistory: { [weak self] in self?.openHistory() },
         openSettings: { [weak self] in self?.openSettings() },
-        openTimerList: { [weak self] in self?.openTimerList() },
-        requestQuit: self?.requestQuit ?? {})
+        openTimerList: { [weak self] in self?.openTimerList() })
     }
   }
   private func openSettings() {
