@@ -49,8 +49,7 @@ import TopTimerSystem
     windows.show(kind: .now) { [weak self] in
       NowView(state: self!.state, focusEntry: focusEntry,
         openHistory: { [weak self] in self?.openHistory() },
-        openSettings: { [weak self] in self?.openSettings() },
-        openTimerList: { [weak self] in self?.openTimerList() })
+        openSettings: { [weak self] in self?.openSettings() })
     }
   }
   private func openSettings() {
@@ -60,15 +59,7 @@ import TopTimerSystem
         importSound: self.importSound)
     }
   }
-  private func openTimerList() {
-    windows.show(kind: .timerList) {
-      TimerListHost(
-        state: self.state, sounds: self.sounds, openHistory: { [weak self] in self?.openHistory() },
-        openReports: { [weak self] in self?.openReports() })
-    }
-  }
   private func openHistory() { windows.show(kind: .history) { HistoryView(state: self.state) } }
-  private func openReports() { windows.show(kind: .reports) { ReportsView(state: self.state) } }
   private func render(_ timer: TimerItem?) {
     let title = StatusTitleFormatter.format(
       timer: timer, additionalActiveCount: max(0, state.activeTimers.count - (timer == nil ? 0 : 1)), now: .now, mode: state.preferences.statusDisplayMode,
@@ -151,10 +142,9 @@ struct TimerListHost: View {
   @ObservedObject var sounds: SoundCatalogState
   @State private var ownsEditor = false
   var openHistory: (() -> Void)? = nil
-  var openReports: (() -> Void)? = nil
   var body: some View {
     TimerListView(
-      state: state, openHistory: openHistory, openReports: openReports,
+      state: state, openHistory: openHistory,
       editTimer: { id in
         state.perform {
           await state.selectEditor(id)

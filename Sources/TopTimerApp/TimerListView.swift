@@ -11,16 +11,14 @@ public struct TimerListView: View {
   @ObservedObject var state: AppState
   @State private var recentlyDeleted = false
   private let openHistory: (() -> Void)?
-  private let openReports: (() -> Void)?
   private let editTimer: ((UUID) -> Void)?
   public init(
     state: AppState, recentlyDeleted: Bool = false, openHistory: (() -> Void)? = nil,
-    openReports: (() -> Void)? = nil, editTimer: ((UUID) -> Void)? = nil
+    editTimer: ((UUID) -> Void)? = nil
   ) {
     self.state = state
     _recentlyDeleted = State(initialValue: recentlyDeleted)
     self.openHistory = openHistory
-    self.openReports = openReports
     self.editTimer = editTimer
   }
   public var body: some View {
@@ -29,10 +27,9 @@ public struct TimerListView: View {
         Text("Timers").tag(false)
         Text("Recently Deleted").tag(true)
       }.pickerStyle(.segmented).labelsHidden().padding(8)
-      if openHistory != nil || openReports != nil {
+      if openHistory != nil {
         HStack {
           Button("History", systemImage: "clock.arrow.circlepath") { openHistory?() }
-          Button("Reports", systemImage: "chart.bar") { openReports?() }
           Spacer()
         }.padding(.horizontal, 8)
       }

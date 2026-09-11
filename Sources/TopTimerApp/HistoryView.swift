@@ -13,6 +13,14 @@ public struct HistoryView: View {
   public init(state: AppState) { self.state = state }
   public var body: some View {
     VStack(spacing: 0) {
+      if !state.activeTimers.isEmpty {
+        VStack(alignment: .leading, spacing: 6) {
+          Text("Active timers").font(.headline)
+          ForEach(state.activeTimers.prefix(100), id: \.id) { timer in
+            ActiveHistoryTimerRow(timer: timer, state: state)
+          }
+        }.padding(.horizontal).padding(.top)
+      }
       HStack {
         Toggle("All time", isOn: $state.historyControls.allTime)
         if !state.historyControls.allTime {
@@ -100,6 +108,32 @@ public struct HistoryView: View {
   }
   private static func duration(_ seconds: TimeInterval) -> String {
     Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond))
+  }
+}
+
+private struct ActiveHistoryTimerRow: View {
+  let timer: TimerItem
+  @ObservedObject var state: AppState
+  var body: some View {
+    TimelineView(.periodic(from: .now, by: 1)) { context in
+      let timing = TimerRowTiming(timer: timer, at: context.date)
+      HStack {
+        VStack(alignment: .leading) {
+          Text(timer.title.isEmpty ? (timer.kind == .stopwatch ? "Stopwatch" : "Timer") : timer.title)
+          Text(timer.state == .paused ? "Paused" : "Running").font(.caption).foregroundStyle(.secondary)
+        }
+        Spacer()
+        Text(timing.text).monospacedDigit()
+        if timer.state == .paused {
+          Button("Resume") { state.perform { _ = await state.resume(timer.id) } }
+        } else {
+          Button("Pause") { state.perform { _ = await state.pause(timer.id) } }
+        }
+        Button(timer.kind == .stopwatch ? "Finish" : "Stop") {
+          state.perform { _ = await (timer.kind == .stopwatch ? state.complete(timer.id) : state.cancel(timer.id)) }
+        }
+      }
+    }
   }
 }
 

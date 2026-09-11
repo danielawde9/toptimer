@@ -5,13 +5,12 @@ public struct NowView: View {
   @ObservedObject private var state: AppState
   private let openHistory: () -> Void
   private let openSettings: () -> Void
-  private let openTimerList: () -> Void
   private let focusEntry: Bool
   @FocusState private var entryFocused: Bool
 
-  public init(state: AppState, focusEntry: Bool = false, openHistory: @escaping () -> Void = {}, openSettings: @escaping () -> Void = {}, openTimerList: @escaping () -> Void = {}) {
+  public init(state: AppState, focusEntry: Bool = false, openHistory: @escaping () -> Void = {}, openSettings: @escaping () -> Void = {}) {
     self.state = state; self.focusEntry = focusEntry; self.openHistory = openHistory
-    self.openSettings = openSettings; self.openTimerList = openTimerList
+    self.openSettings = openSettings
   }
 
   public var body: some View {
@@ -36,7 +35,6 @@ public struct NowView: View {
       if state.activeTimers.count > 1 {
         Text("Other active timers").font(.headline)
         ForEach(state.activeTimers.filter { $0.id != primaryTimer?.id }.prefix(3), id: \.id) { timer in secondary(timer) }
-        if state.activeTimers.count > 4 { Button("Show all active timers", action: openTimerList) }
       }
       Spacer(minLength: 0)
     }.padding(24).frame(minWidth: 460, minHeight: 360, alignment: .topLeading)
