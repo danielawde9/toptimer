@@ -55,7 +55,10 @@ public struct NowView: View {
         .padding(8).background(.secondary.opacity(0.12)).cornerRadius(6)
     }
     if state.notificationStatus == .authorizationDenied || state.notificationStatus == .notAuthorized(.denied) {
-      Text("Notifications are denied. Open Settings to review notification access.").font(.caption).foregroundStyle(.orange)
+      HStack {
+        Text("Notifications are denied.").font(.caption).foregroundStyle(.orange)
+        Button("Open Settings", action: openSettings)
+      }
     }
     if let error = state.inlineError {
       HStack { Text(error).font(.caption).foregroundStyle(.red); Button("Retry") { entryFocused = true } }

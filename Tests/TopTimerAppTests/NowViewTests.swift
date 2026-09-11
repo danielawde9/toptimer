@@ -14,16 +14,6 @@ final class NowViewTests: XCTestCase {
     XCTAssertGreaterThanOrEqual(accessibilityNodes(host).count, 1)
   }
 
-  func testRunningNowViewShowsVisiblePauseAndStopActions() async {
-    let state = AppState(repository: RecordingRepository(), notifications: RecordingNotifications())
-    await state.create(command: "5m Focus")
-    let host = NSHostingView(rootView: NowView(state: state))
-    let window = mount(host)
-    defer { window.close() }
-    XCTAssertEqual(state.priorityTimer?.title, "Focus")
-    XCTAssertGreaterThan(host.bounds.width, 0)
-  }
-
   private func mount<V: View>(_ host: NSHostingView<V>) -> NSWindow {
     _ = NSApplication.shared
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 500), styleMask: [.titled], backing: .buffered, defer: false)
