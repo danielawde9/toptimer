@@ -27,14 +27,14 @@ final class StatusFormattingTests: XCTestCase {
         XCTAssertEqual(StatusTitleFormatter.format(timer: timer, now: now.addingTimeInterval(22), mode: .seconds).text, "00:59:38")
     }
 
-    func testStatusIncludesAdditionalCountAndPausedState() throws {
+    func testStatusOmitsAdditionalCountAndIncludesPausedState() throws {
         let now = Date(timeIntervalSince1970: 1_000)
         var timer = try TimerItem.countdown(title: "Focus", duration: 900, createdAt: now)
         try timer.start(at: now)
-        let value = StatusTitleFormatter.format(timer: timer, additionalActiveCount: 2, now: now)
-        XCTAssertEqual(value.text, "15:00 +2")
+        let value = StatusTitleFormatter.format(timer: timer, now: now)
+        XCTAssertEqual(value.text, "15:00")
         XCTAssertTrue(value.accessibilityLabel.contains("Focus"))
-        XCTAssertTrue(value.accessibilityLabel.contains("2 additional active timers"))
+        XCTAssertFalse(value.accessibilityLabel.contains("additional active timers"))
         try timer.pause(at: now)
         let paused = StatusTitleFormatter.format(timer: timer, now: now)
         XCTAssertTrue(paused.accessibilityLabel.contains("Paused"))

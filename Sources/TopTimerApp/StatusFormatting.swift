@@ -9,7 +9,7 @@ public struct StatusTitle: Equatable, Sendable {
 
 public enum StatusTitleFormatter {
   public static func format(
-    timer: TimerItem?, additionalActiveCount: Int = 0, now: Date,
+    timer: TimerItem?, now: Date,
     mode: StatusDisplayMode = .compact, uses24HourTime: Bool = true
   ) -> StatusTitle {
     guard let timer else { return .init(text: "", showsIcon: true, accessibilityLabel: "TopTimer") }
@@ -30,11 +30,9 @@ public enum StatusTitleFormatter {
     }
     let suffix = timer.kind == .countdown ? "remaining" : "elapsed"
     let state = timer.state == .paused ? "Paused, " : ""
-    let count = max(0, additionalActiveCount)
-    let displayText = count > 0 ? "\(text) +\(count)" : text
     return .init(
-      text: displayText, showsIcon: true,
-      accessibilityLabel: text.isEmpty ? timer.title : "\(timer.title), \(state)\(text) \(suffix)\(count > 0 ? ", \(count) additional active timers" : "")")
+      text: text, showsIcon: true,
+      accessibilityLabel: text.isEmpty ? timer.title : "\(timer.title), \(state)\(text) \(suffix)")
   }
 
   private static func duration(_ seconds: TimeInterval, includeSeconds: Bool) -> String {

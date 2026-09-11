@@ -62,7 +62,7 @@ import TopTimerSystem
   private func openHistory() { windows.show(kind: .history) { HistoryView(state: self.state) } }
   private func render(_ timer: TimerItem?) {
     let title = StatusTitleFormatter.format(
-      timer: timer, additionalActiveCount: max(0, state.activeTimers.count - (timer == nil ? 0 : 1)), now: .now, mode: state.preferences.statusDisplayMode,
+      timer: timer, now: .now, mode: state.preferences.statusDisplayMode,
       uses24HourTime: state.preferences.uses24HourTime)
     item.button?.title =
       title.text.isEmpty && !state.preferences.showsStatusIcon ? "TopTimer" : title.text
