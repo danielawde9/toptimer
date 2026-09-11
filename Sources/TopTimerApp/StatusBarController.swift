@@ -27,6 +27,8 @@ import TopTimerSystem
     self.importSound = importSound
     self.requestQuit = requestQuit
     super.init()
+    item.isVisible = true
+    item.button?.isHidden = false
     item.button?.target = self
     item.button?.action = #selector(toggle)
     item.button?.imagePosition = .imageLeading

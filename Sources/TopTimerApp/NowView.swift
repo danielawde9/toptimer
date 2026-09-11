@@ -42,7 +42,7 @@ public struct NowView: View {
       }
       Spacer(minLength: 0)
     }.padding(24).frame(minWidth: 460, minHeight: 360, alignment: .topLeading)
-      .onAppear { entryFocused = focusEntry && state.activeTimers.isEmpty }.onExitCommand {}
+      .onAppear { entryFocused = focusEntry && state.activeTimers.isEmpty }
   }
 
   private func example(_ text: String) -> some View {
