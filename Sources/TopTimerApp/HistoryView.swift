@@ -132,19 +132,35 @@ private struct ActiveHistoryTimerRow: View {
       HStack {
         VStack(alignment: .leading) {
           Text(timer.title.isEmpty ? (timer.kind == .stopwatch ? "Stopwatch" : "Timer") : timer.title)
-          Text(timer.state == .paused ? "Paused" : "Running").font(.caption).foregroundStyle(.secondary)
+          Text(statusText).font(.caption).foregroundStyle(.secondary)
         }
         Spacer()
         Text(timing.text).monospacedDigit()
         if timer.state == .paused {
           Button("Resume") { state.perform { _ = await state.resume(timer.id) } }.buttonStyle(.borderless)
-        } else {
+          terminalAction
+        } else if timer.state == .running {
           Button("Pause") { state.perform { _ = await state.pause(timer.id) } }.buttonStyle(.borderless)
+          terminalAction
         }
-        Button(timer.kind == .stopwatch ? "Finish" : "Stop") {
-          state.perform { _ = await (timer.kind == .stopwatch ? state.complete(timer.id) : state.cancel(timer.id)) }
-        }.buttonStyle(.borderless)
       }.frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+    }
+  }
+  @ViewBuilder private var terminalAction: some View {
+    if timer.kind == .stopwatch {
+      Button("Finish") { state.perform { _ = await state.complete(timer.id) } }.buttonStyle(.borderless)
+    } else {
+      Button("Stop") { state.perform { _ = await state.cancel(timer.id) } }.buttonStyle(.borderless)
+    }
+  }
+  private var statusText: String {
+    switch timer.state {
+    case .running: "Running"
+    case .paused: "Paused"
+    case .completed: "Finished"
+    case .cancelled: "Stopped"
+    case .acknowledged: "Completed"
+    case .idle: "Not started"
     }
   }
 }

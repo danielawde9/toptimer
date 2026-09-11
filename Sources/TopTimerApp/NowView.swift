@@ -68,14 +68,19 @@ public struct NowView: View {
       TimelineView(.periodic(from: .now, by: 1)) { context in
         let timing = TimerRowTiming(timer: timer, at: context.date)
         VStack(alignment: .leading, spacing: 6) {
-          Text(timer.state == .paused ? "Paused" : "Running").accessibilityAddTraits(.isHeader)
-          Text(timing.text).monospacedDigit().font(.title2).accessibilityLabel("\(timer.state == .paused ? "Paused" : "Running"), \(timing.text)")
+          Text(statusText(for: timer)).accessibilityAddTraits(.isHeader)
+          Text(timing.text).monospacedDigit().font(.title2).accessibilityLabel("\(statusText(for: timer)), \(timing.text)")
           ProgressView(value: timing.progress)
           HStack {
-            if timer.state == .paused { Button("Resume") { state.perform { _ = await state.resume(timer.id) } } }
-            else { Button("Pause") { state.perform { _ = await state.pause(timer.id) } } }
-            if timer.kind == .stopwatch { Button("Finish") { state.perform { _ = await state.complete(timer.id) } } }
-            else { Button("Stop") { state.perform { _ = await state.cancel(timer.id) } } }
+            if timer.state == .paused {
+              Button("Resume") { state.perform { _ = await state.resume(timer.id) } }
+              terminalAction(timer)
+            } else if timer.state == .running {
+              Button("Pause") { state.perform { _ = await state.pause(timer.id) } }
+              terminalAction(timer)
+            } else {
+              Text("No active controls").foregroundStyle(.secondary)
+            }
           }
         }
       }
@@ -88,15 +93,33 @@ public struct NowView: View {
       Spacer(); Text(TimerRowTiming(timer: timer, at: .now).text).monospacedDigit()
       if timer.state == .paused {
         Button("Resume") { state.perform { _ = await state.resume(timer.id) } }
-      } else {
+      } else if timer.state == .running {
         Button("Pause") { state.perform { _ = await state.pause(timer.id) } }
       }
-      Button(timer.kind == .stopwatch ? "Finish" : "Stop") {
-        state.perform { _ = await (timer.kind == .stopwatch ? state.complete(timer.id) : state.cancel(timer.id)) }
+      if timer.state == .running || timer.state == .paused {
+        terminalAction(timer)
       }
     }.padding(.vertical, 4)
   }
 
+  @ViewBuilder private func terminalAction(_ timer: TimerItem) -> some View {
+    if timer.kind == .stopwatch {
+      Button("Finish") { state.perform { _ = await state.complete(timer.id) } }
+    } else {
+      Button("Stop") { state.perform { _ = await state.cancel(timer.id) } }
+    }
+  }
+
   private func startEntry() { let command = state.quickEntryText; state.perform { await state.create(command: command) } }
   private var primaryTimer: TimerItem? { state.priorityTimer ?? state.activeTimers.first }
+  private func statusText(for timer: TimerItem) -> String {
+    switch timer.state {
+    case .running: "Running"
+    case .paused: "Paused"
+    case .completed: "Finished"
+    case .cancelled: "Stopped"
+    case .acknowledged: "Completed"
+    case .idle: "Not started"
+    }
+  }
 }
