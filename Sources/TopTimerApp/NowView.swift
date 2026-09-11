@@ -58,7 +58,7 @@ public struct NowView: View {
       }
     }
     if let error = state.inlineError {
-      HStack { Text(error).font(.caption).foregroundStyle(.red); Button("Retry") { entryFocused = true } }
+      HStack { Text(error).font(.caption).foregroundStyle(.red); Button("Retry") { entryFocused = true; startEntry() } }
     }
   }
 
