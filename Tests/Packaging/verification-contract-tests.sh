@@ -115,7 +115,7 @@ expect_rejection minimum-system "LSMinimumSystemVersion must be 13.5" \
   set_plist_value LSMinimumSystemVersion 14.0
 expect_rejection agent-app "LSUIElement must be true" \
   set_plist_value LSUIElement false
-expect_rejection identifier "CFBundleIdentifier must be com.lelabodigital.TopTimer" \
+expect_rejection identifier "CFBundleIdentifier must be com.danielawde9.toptimer" \
   set_plist_value CFBundleIdentifier com.example.TopTimer
 expect_rejection invalid-plist "Info.plist is missing or invalid" invalidate_plist
 expect_rejection missing-executable "TopTimer executable missing or not executable" remove_executable

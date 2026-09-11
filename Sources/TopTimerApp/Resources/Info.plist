@@ -5,7 +5,7 @@
   <key>CFBundleExecutable</key>
   <string>TopTimer</string>
   <key>CFBundleIdentifier</key>
-  <string>com.lelabodigital.TopTimer</string>
+  <string>com.danielawde9.toptimer</string>
   <key>CFBundleIconFile</key>
   <string>TopTimer</string>
   <key>CFBundleInfoDictionaryVersion</key>

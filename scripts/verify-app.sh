@@ -87,8 +87,8 @@ if [[ "$(plist_value LSUIElement)" != "true" ]]; then
   exit 1
 fi
 
-if [[ "$(plist_value CFBundleIdentifier)" != "com.lelabodigital.TopTimer" ]]; then
-  echo "CFBundleIdentifier must be com.lelabodigital.TopTimer" >&2
+if [[ "$(plist_value CFBundleIdentifier)" != "com.danielawde9.toptimer" ]]; then
+  echo "CFBundleIdentifier must be com.danielawde9.toptimer" >&2
   exit 1
 fi
 

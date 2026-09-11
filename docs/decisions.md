@@ -623,3 +623,17 @@ Durable timer and history semantics remain owned by AppState and persistence.
 
 **If changed:** A destructive quit would need an explicit product decision and
 new tests proving whether active timers are cancelled or continue while closed.
+
+## 2026-09-11 — Application identifier and bounded Now content
+
+**Decision:** The packaged application uses bundle identifier
+`com.danielawde9.toptimer`, and the Now window places its variable-height timer
+content inside a native scroll container.
+
+**Why:** The app is being handed over under Daniel's reverse-DNS identifier,
+and recovered timers must remain reachable when their content exceeds the
+window height.
+
+**If changed:** Update the package verifier and any launch/login registration
+assumptions together with the identifier; a fixed-height Now surface would need
+another bounded overflow design.

@@ -14,30 +14,31 @@ public struct NowView: View {
   }
 
   public var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      HStack {
-        Text("TopTimer").font(.title2.bold()); Spacer()
-        Button("History", action: openHistory); Button("Settings", action: openSettings)
-      }
-      HStack {
-        TextField("Start a timer, e.g. 25m focus", text: $state.quickEntryText)
-          .focused($entryFocused).onSubmit { startEntry() }.accessibilityLabel("Timer entry")
-        Button("Start", action: startEntry).keyboardShortcut(.return, modifiers: [])
-      }
-      if state.activeTimers.isEmpty {
-        Text("Start a timer").font(.headline)
+    ScrollView {
+      VStack(alignment: .leading, spacing: 16) {
         HStack {
-          example("25m focus"); example("10m tea"); example("stopwatch reading")
+          Text("TopTimer").font(.title2.bold()); Spacer()
+          Button("History", action: openHistory); Button("Settings", action: openSettings)
         }
-      }
-      recovery
-      if let timer = primaryTimer { primary(timer) }
-      if state.activeTimers.count > 1 {
-        Text("Other active timers").font(.headline)
-        ForEach(state.activeTimers.filter { $0.id != primaryTimer?.id }.prefix(3), id: \.id) { timer in secondary(timer) }
-      }
-      Spacer(minLength: 0)
-    }.padding(24).frame(minWidth: 460, minHeight: 360, alignment: .topLeading)
+        HStack {
+          TextField("Start a timer, e.g. 25m focus", text: $state.quickEntryText)
+            .focused($entryFocused).onSubmit { startEntry() }.accessibilityLabel("Timer entry")
+          Button("Start", action: startEntry).keyboardShortcut(.return, modifiers: [])
+        }
+        if state.activeTimers.isEmpty {
+          Text("Start a timer").font(.headline)
+          HStack {
+            example("25m focus"); example("10m tea"); example("stopwatch reading")
+          }
+        }
+        recovery
+        if let timer = primaryTimer { primary(timer) }
+        if state.activeTimers.count > 1 {
+          Text("Other active timers").font(.headline)
+          ForEach(state.activeTimers.filter { $0.id != primaryTimer?.id }.prefix(3), id: \.id) { timer in secondary(timer) }
+        }
+      }.padding(24)
+    }.frame(minWidth: 460, minHeight: 360, alignment: .topLeading)
       .onAppear { entryFocused = focusEntry && state.activeTimers.isEmpty }
   }
 
