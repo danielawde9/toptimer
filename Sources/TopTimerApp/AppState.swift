@@ -46,6 +46,7 @@ public final class AppState: ObservableObject {
     }
   }
   @Published public private(set) var activeTimers: [TimerItem] = []
+  @Published public private(set) var startupRecovery: StartupRecovery = .none
   @Published public private(set) var deletedTimers: [TimerItem] = []
   @Published public var quickEntryText = ""
   @Published public private(set) var inlineError: String?
@@ -307,11 +308,12 @@ public final class AppState: ObservableObject {
   }
 
   /// Re-reads durable state; it never decrements a UI-side counter.
-  public func refresh(now date: Date) async {
-    guard date.timeIntervalSinceReferenceDate.isFinite else { return }
-    guard !refreshing else { return }
+  @discardableResult public func refresh(now date: Date) async -> Int {
+    guard date.timeIntervalSinceReferenceDate.isFinite else { return 0 }
+    guard !refreshing else { return 0 }
     refreshing = true
     defer { refreshing = false }
+    var completedCount = 0
     if preferences.retention != .unlimited,
       lastRetentionDay != Calendar.current.startOfDay(for: date)
     {
@@ -321,11 +323,13 @@ public final class AppState: ObservableObject {
       let current = try await repository.due(at: date, limit: 100)
       for timer in current {
         let outcome = try await repository.complete(timer.id, at: date)
+        completedCount += 1
         if outcome.completed != timer { await playCompletion(outcome.completed) }
         if let successor = outcome.successor { await scheduleAfterPersistence(successor) }
       }
     } catch { inlineError = "Could not refresh timers." }
     await publishActive(at: date)
+    return completedCount
   }
 
   private func publishActive(at date: Date? = nil) async {
@@ -341,10 +345,15 @@ public final class AppState: ObservableObject {
 
   public func load() async {
     await applyRetention()
-    await publishActive()
+    let completedCount = await refresh(now: now())
+    startupRecovery = completedCount > 0
+      ? .completedWhileClosed(count: completedCount, activeCount: activeTimers.count)
+      : (activeTimers.isEmpty ? .none : .activeTimers(count: activeTimers.count))
     await loadHistory()
     await refreshSuggestions(query: quickEntryText)
   }
+
+  public func dismissStartupRecovery() { startupRecovery = .none }
 
   public func loadHistory() async {
     await loadHistory(

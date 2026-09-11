@@ -329,7 +329,7 @@ final class AppStateTests: XCTestCase {
         await repository.waitForActiveStart()
         await state.refresh(now: Date(timeIntervalSince1970: 1_000))
         await repository.releaseActive()
-        await first.value
+        _ = await first.value
         let operations = await repository.recordedOperations()
         XCTAssertEqual(operations.filter { $0 == "due" }.count, 1, "only one due scan overlaps")
         XCTAssertEqual(operations.filter { $0 == "publish" }.count, 1, "only the winning refresh publishes")
@@ -406,6 +406,23 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(second.suggestions, ["1m Done #work", "5m Focus #work"])
         let historyCount = try await secondRepository.historyCount(for: completedID, limit: 100)
         XCTAssertEqual(historyCount, 1)
+    }
+
+    func testLoadSettlesExpiredTimersAndPublishesRecoverySummary() async throws {
+        let launch = Date(timeIntervalSince1970: 2_000)
+        var timer = try TimerItem.countdown(title: "Closed", duration: 60, createdAt: launch.addingTimeInterval(-120))
+        try timer.start(at: launch.addingTimeInterval(-120))
+        let repository = RecordingRepository()
+        await repository.seed(timer)
+        let state = AppState(repository: repository, notifications: RecordingNotifications(), now: { launch })
+        await state.load()
+        XCTAssertTrue(state.activeTimers.isEmpty)
+        XCTAssertEqual(state.startupRecovery, .completedWhileClosed(count: 1, activeCount: 0))
+        let firstCompletions = (await repository.recordedOperations()).filter { $0 == "complete" }.count
+        XCTAssertEqual(firstCompletions, 1)
+        await state.load()
+        let secondCompletions = (await repository.recordedOperations()).filter { $0 == "complete" }.count
+        XCTAssertEqual(secondCompletions, 1)
     }
 }
 

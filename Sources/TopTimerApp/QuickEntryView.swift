@@ -9,13 +9,15 @@ public struct QuickEntryView: View {
   let closePopover: () -> Void
   let openSettings: (() -> Void)?
   let openTimerList: (() -> Void)?
-  public init(state: AppState, showingList: Binding<Bool>, closePopover: @escaping () -> Void = {}, openSettings: (() -> Void)? = nil, openTimerList: (() -> Void)? = nil)
+  let requestQuit: () -> Void
+  public init(state: AppState, showingList: Binding<Bool>, closePopover: @escaping () -> Void = {}, openSettings: (() -> Void)? = nil, openTimerList: (() -> Void)? = nil, requestQuit: @escaping () -> Void = {})
   {
     self.state = state
     _showingList = showingList
     self.closePopover = closePopover
     self.openSettings = openSettings
     self.openTimerList = openTimerList
+    self.requestQuit = requestQuit
   }
   public var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -51,7 +53,7 @@ public struct QuickEntryView: View {
         }.help("Show timers").accessibilityLabel("Show timers")
         Spacer()
         Button {
-          NSApplication.shared.terminate(nil)
+          requestQuit()
         } label: {
           Image(systemName: "power").frame(width: 28, height: 28).contentShape(Rectangle())
         }.help("Quit TopTimer").accessibilityLabel("Quit TopTimer")

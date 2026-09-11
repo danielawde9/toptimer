@@ -9,6 +9,8 @@ import UserNotifications
   private let operations = AppOperationOwner()
   private var starting = false
   private var statusController: StatusBarController?
+  private var state: AppState?
+  private var confirmedPersistentTermination = false
   private var refreshTimer: Timer?
   private var store: CoreDataStore?
   private var hotKeys: GlobalHotKeyController?
@@ -36,6 +38,23 @@ import UserNotifications
   }
   public func applicationWillTerminate(_ notification: Notification) { shutdownResources() }
   public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    if !confirmedPersistentTermination, let state {
+      switch QuitPolicy.decide(activeTimers: state.activeTimers) {
+      case .quitImmediately: break
+      case let .confirmPersistence(running, paused):
+        let alert = NSAlert()
+        alert.messageText = "Keep active timers running?"
+        alert.informativeText = "TopTimer will close. Running timers continue toward their saved end time; paused timers stay paused. You can control them when you open TopTimer again."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Quit and keep timers")
+        alert.accessoryView = NSTextField(labelWithString: "Running: \(running) · Paused: \(paused)")
+        guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
+        confirmedPersistentTermination = true
+        sender.terminate(nil)
+        return .terminateLater
+      }
+    }
+    confirmedPersistentTermination = false
     let effects = lifecycle.requestTermination()
     guard effects.contains(.beginClose) else { return .terminateLater }
     operations.stopAccepting()
@@ -122,7 +141,8 @@ import UserNotifications
         state: state,
         updateHotKey: { [weak self] slot, shortcut in self?.replaceHotKey(shortcut, for: slot) },
         updateLogin: { [weak self] enabled in self?.setLogin(enabled: enabled) },
-        importSound: { url in try await soundController.importSound(from: url).lastPathComponent })
+        importSound: { url in try await soundController.importSound(from: url).lastPathComponent },
+        requestQuit: { [weak self] in self?.requestQuit() })
       let keys = GlobalHotKeyController(
         quickEntry: { [weak controller] in controller?.openFromShortcut() },
         pauseResumePriority: { [weak state] in
@@ -139,7 +159,9 @@ import UserNotifications
         for: .pauseResumePriority)
       guard lifecycle.startResult(.success).contains(.createResources) else { return }
       statusController = controller
+      self.state = state
       hotKeys = keys
+      controller.showNow(focusEntry: state.activeTimers.isEmpty)
       if preferences.launchesAtLogin {
         _ = state.changeLogin(true, apply: { self.setLogin(enabled: $0) })
       }
@@ -169,6 +191,7 @@ import UserNotifications
       return nil
     } catch { return "Could not use that shortcut. The previous shortcut is unchanged." }
   }
+  private func requestQuit() { NSApp.terminate(nil) }
   private func setLogin(enabled: Bool) -> String? {
     do {
       try loginItem.setEnabled(enabled)
@@ -190,6 +213,7 @@ import UserNotifications
     hotKeys = nil
     statusController?.shutdown()
     statusController = nil
+    state = nil
     failureController?.shutdown()
     failureController = nil
   }

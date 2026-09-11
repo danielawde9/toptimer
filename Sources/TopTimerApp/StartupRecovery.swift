@@ -8,10 +8,10 @@ public enum StartupRecovery: Equatable, Sendable {
   public var message: String? {
     switch self {
     case .none: return nil
-    case let .activeTimers(count): return "(count) timer\(count == 1 ? "" : "s") active"
+    case let .activeTimers(count): return "\(count) active timer\(count == 1 ? "" : "s") recovered"
     case let .completedWhileClosed(count, activeCount):
-      let finished = "(count) timer\(count == 1 ? "" : "s") finished while TopTimer was closed"
-      return activeCount == 0 ? finished : "(finished); (activeCount) still active"
+      let finished = "\(count) timer\(count == 1 ? "" : "s") finished while TopTimer was closed"
+      return activeCount == 0 ? finished : "\(finished); \(activeCount) still active"
     }
   }
 }

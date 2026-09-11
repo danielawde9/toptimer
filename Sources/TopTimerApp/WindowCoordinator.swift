@@ -31,13 +31,18 @@ public enum TopTimerWindow: CaseIterable, Hashable, Sendable {
       NSApp.activate(ignoringOtherApps: true)
       return existing
     }
-    let size =
-      kind == .timerList ? NSSize(width: 380, height: 420) : NSSize(width: 700, height: 520)
+    let size: NSSize
+    switch kind {
+    case .now: size = NSSize(width: 520, height: 420)
+    case .timerList: size = NSSize(width: 380, height: 420)
+    default: size = NSSize(width: 700, height: 520)
+    }
     let window = NSWindow(
       contentRect: NSRect(origin: .zero, size: size),
       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered,
       defer: false)
     window.title = kind.title
+    if kind == .now { window.minSize = NSSize(width: 460, height: 360) }
     window.contentViewController = NSHostingController(rootView: AnyView(content()))
     window.delegate = self
     window.setFrameAutosaveName("TopTimer.\(kind.title)")
