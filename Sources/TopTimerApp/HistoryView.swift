@@ -46,16 +46,23 @@ public struct HistoryView: View {
   }
   @ViewBuilder private func historyContent(showingDeleted: Bool) -> some View {
     if !showingDeleted {
-      HStack {
-        Toggle("All time", isOn: $state.historyControls.allTime)
-        if !state.historyControls.allTime {
-          DatePicker("From", selection: $state.historyControls.from, displayedComponents: .date)
-          DatePicker("Through", selection: $state.historyControls.through, displayedComponents: .date)
+      VStack(alignment: .leading, spacing: 8) {
+        HStack {
+          Toggle("All time", isOn: $state.historyControls.allTime)
+          Spacer()
+          Button("Export CSV…") { exportCSV() }.disabled(state.historyPage.entries.isEmpty)
         }
-        TextField("Search title, description, or tag", text: $state.historyControls.query)
-        Button("Apply") { reload() }
-        Button("Export CSV…") { exportCSV() }.disabled(state.historyPage.entries.isEmpty)
-      }.padding()
+        if !state.historyControls.allTime {
+          HStack {
+            DatePicker("From", selection: $state.historyControls.from, displayedComponents: .date)
+            DatePicker("Through", selection: $state.historyControls.through, displayedComponents: .date)
+          }
+        }
+        HStack {
+          TextField("Search title, description, or tag", text: $state.historyControls.query)
+          Button("Apply") { reload() }.keyboardShortcut(.defaultAction)
+        }
+      }.padding(.horizontal).padding(.bottom, 8)
     }
     if state.historyLoading {
       VStack { ProgressView(); Text("Loading history…"); Button("Cancel") { state.cancelHistoryLoad() } }

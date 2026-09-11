@@ -170,9 +170,12 @@ public struct SettingsView: View {
 
   private func shortcutRow(_ title: String, text: Binding<String>, slot: HotKeySlot) -> some View {
     HStack {
-      Text(title)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+        Text("⌘⇧\(keyName(for: text.wrappedValue))").font(.caption).foregroundStyle(.secondary)
+      }
       Spacer()
-      TextField("Key code", text: text).frame(width: 72)
+      TextField("Key code (0–127)", text: text).frame(width: 100)
       Button("Set") {
         guard let code = UInt32(text.wrappedValue),
           let shortcut = try? Shortcut(keyCode: code, modifiers: 768)
@@ -192,6 +195,16 @@ public struct SettingsView: View {
         }
       }
     }
+  }
+
+  private func keyName(for value: String) -> String {
+    let names: [String: String] = [
+      "0": "A", "1": "S", "2": "D", "3": "F", "4": "H", "5": "G", "6": "Z",
+      "7": "X", "8": "C", "9": "V", "11": "B", "12": "Q", "13": "W", "14": "E",
+      "15": "R", "16": "Y", "17": "T", "31": "O", "32": "U", "34": "I",
+      "35": "P", "37": "L", "38": "J", "40": "K", "45": "N", "46": "M"
+    ]
+    return names[value] ?? "key (value)"
   }
 
   private func setLogin(_ enabled: Bool) {
