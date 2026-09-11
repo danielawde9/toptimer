@@ -49,6 +49,7 @@ public enum GlobalHotKeyControllerError: Error, Sendable, Equatable { case inval
     public func shortcut(for slot: HotKeySlot) -> Shortcut? { registrations[slot]?.shortcut }
 
     public func register(_ shortcut: Shortcut, for slot: HotKeySlot) throws {
+        if registrations[slot]?.shortcut == shortcut { return }
         guard registrations.allSatisfy({ $0.key == slot || $0.value.shortcut != shortcut }) else { throw GlobalHotKeyControllerError.shortcutConflict }
         let replacement: HotKeyToken
         do { replacement = try registrar.register(shortcut, identifier: Self.identifier(for: slot)) }
