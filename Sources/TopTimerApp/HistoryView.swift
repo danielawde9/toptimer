@@ -6,9 +6,10 @@ extension HistoryEntry: Identifiable {}
 
 public struct HistoryView: View {
   @ObservedObject private var state: AppState
-  @State private var selected: HistoryEntry?
+  @State private var selectedIDs: Set<UUID> = []
   @State private var selectedTab: HistoryTab = .history
   @State private var editing: HistoryEntry?
+  @State private var showingDeleteAllConfirmation = false
 
   public init(state: AppState) { self.state = state }
   public var body: some View {
@@ -26,6 +27,17 @@ public struct HistoryView: View {
       if let error = state.exportError { Text(error).foregroundStyle(.red).padding() }
     }.frame(minWidth: 680, minHeight: 460).accessibilityIdentifier("history-view")
       .onAppear { reload() }
+      .onChange(of: selectedTab) { _ in selectedIDs.removeAll() }
+      .alert("Delete all history?", isPresented: $showingDeleteAllConfirmation) {
+        Button("Cancel", role: .cancel) {}
+        Button("Delete All", role: .destructive) {
+          state.perform {
+            if await state.deleteAllHistory() { selectedIDs.removeAll() }
+          }
+        }
+      } message: {
+        Text("All completed history will move to Recently Deleted. Active timers are not affected.")
+      }
       .sheet(item: $editing) { entry in HistoryEditor(entry: entry, state: state) { editing = nil }
       }
   }
@@ -82,18 +94,33 @@ public struct HistoryView: View {
     let values = entries(showingDeleted: showingDeleted)
     return VStack(spacing: 0) {
       Table(values, selection: Binding(
-        get: { selected?.id }, set: { id in selected = values.first { $0.id == id } })) {
+        get: { selectedIDs }, set: { selectedIDs = $0 })) {
         TableColumn("Timer") { Text($0.title.isEmpty ? "Untitled timer" : $0.title) }
         TableColumn("Tags") { Text($0.tags.map { "#\($0)" }.joined(separator: " ")) }
         TableColumn("Ended") { Text(WallClockDisplay.string($0.endedAt, uses24HourTime: state.preferences.uses24HourTime, includesDate: true)) }
         TableColumn("Duration") { Text(Self.duration($0.elapsedSeconds)).monospacedDigit() }
       }.frame(maxHeight: .infinity)
       HStack {
-        if let selected {
-          if showingDeleted { Button("Recover") { state.perform { _ = await state.recoverHistory(selected.id) } } }
-          else {
-            Button("Edit") { editing = selected }
-            Button("Delete", role: .destructive) { state.perform { _ = await state.deleteHistory(selected) } }
+        let selected = values.filter { selectedIDs.contains($0.id) }
+        if showingDeleted {
+          if !selected.isEmpty {
+            Button("Recover Selected") {
+              state.perform {
+                if await state.recoverHistory(selected.map(\.id)) { selectedIDs.removeAll() }
+              }
+            }
+          }
+        } else {
+          if selected.count == 1, let entry = selected.first { Button("Edit") { editing = entry } }
+          if !selected.isEmpty {
+            Button("Delete Selected", role: .destructive) {
+              state.perform {
+                if await state.deleteHistory(selected) { selectedIDs.removeAll() }
+              }
+            }
+          }
+          if !values.isEmpty {
+            Button("Delete All…", role: .destructive) { showingDeleteAllConfirmation = true }
           }
         }
         Spacer()

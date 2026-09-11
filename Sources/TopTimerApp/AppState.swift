@@ -470,12 +470,43 @@ public final class AppState: ObservableObject {
   }
 
   @discardableResult public func deleteHistory(_ entry: HistoryEntry) async -> Bool {
+    await deleteHistory([entry])
+  }
+
+  @discardableResult public func deleteHistory(_ entries: [HistoryEntry]) async -> Bool {
+    guard !entries.isEmpty else { return true }
     do {
-      try await repository.softDeleteHistory(entry.id, at: now())
+      for entry in entries.prefix(HistoryAnalytics.maximumEntries) {
+        try await repository.softDeleteHistory(entry.id, at: now())
+      }
       await refreshHistoryConsumers()
       return true
     } catch {
       historyError = "Could not delete this history record. Try again."
+      return false
+    }
+  }
+
+  @discardableResult public func deleteAllHistory() async -> Bool {
+    do {
+      let entries = try await collectHistory(from: nil, through: nil, query: "")
+      return await deleteHistory(entries)
+    } catch {
+      historyError = "Could not load all history for deletion. Try again."
+      return false
+    }
+  }
+
+  @discardableResult public func recoverHistory(_ ids: [UUID]) async -> Bool {
+    guard !ids.isEmpty else { return true }
+    do {
+      for id in ids.prefix(HistoryAnalytics.maximumEntries) {
+        try await repository.recoverHistory(id)
+      }
+      await refreshHistoryConsumers()
+      return true
+    } catch {
+      historyError = "Could not recover timer history. Try again."
       return false
     }
   }
