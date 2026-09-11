@@ -611,3 +611,15 @@ and ensures its native text field and toolbar have drawable bounds.
 **If changed:** A dynamic popover height needs a measured content-size update
 whenever suggestions or inline timer rows appear, plus regression coverage for
 every expansion and contraction transition.
+
+## 2026-09-11 — Now window lifecycle boundary
+
+**Decision:** TopTimer's primary surface is a retained Now window; closing it
+only hides the interface. Quitting with running or paused timers requires an
+explicit persistence confirmation, and launch recovery is presentation-only.
+
+**Why:** A menu-bar-only home made active timers and the return path unclear.
+Durable timer and history semantics remain owned by AppState and persistence.
+
+**If changed:** A destructive quit would need an explicit product decision and
+new tests proving whether active timers are cancelled or continue while closed.
