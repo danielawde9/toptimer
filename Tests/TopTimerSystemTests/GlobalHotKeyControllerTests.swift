@@ -36,6 +36,19 @@ final class GlobalHotKeyControllerTests: XCTestCase {
         XCTAssertEqual(controller.shortcut(for: .quickEntry), shortcut)
     }
 
+    func testUnregisteringASlotRemovesOnlyThatShortcut() throws {
+        let registrar = HotKeyRegistrarSpy()
+        let controller = GlobalHotKeyController(registrar: registrar)
+        try controller.register(try Shortcut(keyCode: 1, modifiers: 256), for: .quickEntry)
+        try controller.register(try Shortcut(keyCode: 2, modifiers: 256), for: .pauseResumePriority)
+
+        try controller.unregister(for: .quickEntry)
+
+        XCTAssertNil(controller.shortcut(for: .quickEntry))
+        XCTAssertEqual(controller.shortcut(for: .pauseResumePriority)?.keyCode, 2)
+        XCTAssertEqual(registrar.operations, ["register:1", "register:2", "unregister:1"])
+    }
+
     func testFailedReplacementPreservesPreviousRegistration() throws {
         let registrar = HotKeyRegistrarSpy(rejectedKeyCode: 2)
         let controller = GlobalHotKeyController(registrar: registrar)

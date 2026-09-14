@@ -20,6 +20,16 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertEqual(
       try TopTimerSettingsCodec.decode(TopTimerSettingsCodec.encode(settings)), settings)
   }
+
+  func testRelaunchPreservesAnExplicitlyUnsetShortcut() throws {
+    var settings = TopTimerSettings.defaults
+    settings.quickEntryShortcutIsDisabled = true
+
+    let decoded = try TopTimerSettingsCodec.decode(TopTimerSettingsCodec.encode(settings))
+
+    XCTAssertNil(decoded.quickEntryShortcut)
+    XCTAssertTrue(decoded.quickEntryShortcutIsDisabled)
+  }
   func testVersionedCodecNormalizesDecodedValuesAndRejectsOversizedPayload() throws {
     let data = Data(#"{"version":1,"snoozeSeconds":0,"historyPageSize":5000,"alertVolume":2}"#.utf8)
     let decoded = try TopTimerSettingsCodec.decode(data)

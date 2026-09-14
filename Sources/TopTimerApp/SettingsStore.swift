@@ -37,6 +37,8 @@ public enum TopTimerSettingsCodec {
     var quickModifiers: UInt32?
     var pauseKey: UInt32?
     var pauseModifiers: UInt32?
+    var quickEntryShortcutIsDisabled: Bool?
+    var pauseResumeShortcutIsDisabled: Bool?
   }
   public static func encode(_ settings: TopTimerSettings) throws -> Data {
     var value = settings
@@ -51,7 +53,9 @@ public enum TopTimerSettingsCodec {
       retention: value.retention.rawValue, quickKey: value.quickEntryShortcut?.keyCode,
       quickModifiers: value.quickEntryShortcut?.modifiers,
       pauseKey: value.pauseResumeShortcut?.keyCode,
-      pauseModifiers: value.pauseResumeShortcut?.modifiers)
+      pauseModifiers: value.pauseResumeShortcut?.modifiers,
+      quickEntryShortcutIsDisabled: value.quickEntryShortcutIsDisabled,
+      pauseResumeShortcutIsDisabled: value.pauseResumeShortcutIsDisabled)
     let data = try JSONEncoder().encode(payload)
     guard data.count <= maximumBytes else { throw SettingsStoreError.oversized }
     return data
@@ -79,12 +83,17 @@ public enum TopTimerSettingsCodec {
       payload.statusDisplayMode == "seconds"
       ? .seconds : payload.statusDisplayMode == "clock" ? .clock : .compact
     value.retention = payload.retention.flatMap(HistoryRetention.init(rawValue:)) ?? .unlimited
+    value.quickEntryShortcutIsDisabled = payload.quickEntryShortcutIsDisabled ?? false
+    value.pauseResumeShortcutIsDisabled = payload.pauseResumeShortcutIsDisabled ?? false
     if let key = payload.quickKey, let modifiers = payload.quickModifiers {
       value.quickEntryShortcut = try Shortcut(keyCode: key, modifiers: modifiers)
     }
     if let key = payload.pauseKey, let modifiers = payload.pauseModifiers {
       value.pauseResumeShortcut = try Shortcut(keyCode: key, modifiers: modifiers)
     }
+    guard !(value.quickEntryShortcutIsDisabled && value.quickEntryShortcut != nil),
+      !(value.pauseResumeShortcutIsDisabled && value.pauseResumeShortcut != nil)
+    else { throw SettingsStoreError.malformed }
     value.normalize()
     return value
   }

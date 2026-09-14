@@ -32,6 +32,8 @@ public struct TopTimerSettings: Equatable, Sendable {
   public var showsStatusIcon = true
   public var quickEntryShortcut: Shortcut?
   public var pauseResumeShortcut: Shortcut?
+  public var quickEntryShortcutIsDisabled = false
+  public var pauseResumeShortcutIsDisabled = false
   public var defaultAlertName: String?
   public var alertVolume = 1.0 {
     didSet { alertVolume = min(1, max(0, alertVolume.isFinite ? alertVolume : 1)) }
@@ -64,7 +66,7 @@ public typealias AppPreferences = TopTimerSettings
 public struct SettingsView: View {
   @Binding private var settings: TopTimerSettings
   private let notificationDenied: Bool
-  private let updateHotKey: (HotKeySlot, Shortcut) -> String?
+  private let updateHotKey: (HotKeySlot, Shortcut?) -> String?
   private let updateLogin: (Bool) -> String?
   private let importSound: (URL) async throws -> String
   private let operations: AppOperationOwner?
@@ -76,7 +78,7 @@ public struct SettingsView: View {
 
   public init(
     settings: Binding<TopTimerSettings>, notificationDenied: Bool = false,
-    updateHotKey: @escaping (HotKeySlot, Shortcut) -> String? = { _, _ in nil },
+    updateHotKey: @escaping (HotKeySlot, Shortcut?) -> String? = { _, _ in nil },
     updateLogin: @escaping (Bool) -> String? = { _ in nil },
     importSound: @escaping (URL) async throws -> String = { _ in
       throw CocoaError(.fileReadUnsupportedScheme)
@@ -172,10 +174,10 @@ public struct SettingsView: View {
     HStack {
       VStack(alignment: .leading, spacing: 2) {
         Text(title)
-        Text("⌘⇧\(keyName(for: text.wrappedValue))").font(.caption).foregroundStyle(.secondary)
+        Text(shortcutDescription(for: text.wrappedValue, slot: slot)).font(.caption).foregroundStyle(.secondary)
       }
       Spacer()
-      TextField("Key code (0–127)", text: text).frame(width: 100)
+      TextField("Key code", text: text).frame(width: 64)
       Button("Set") {
         guard let code = UInt32(text.wrappedValue),
           let shortcut = try? Shortcut(keyCode: code, modifiers: 768)
@@ -183,18 +185,34 @@ public struct SettingsView: View {
           error = "Enter a valid key code. The previous shortcut is unchanged."
           return
         }
-        if let message = updateHotKey(slot, shortcut) {
-          error = message
-        } else {
-          error = nil
-          if slot == .quickEntry {
-            settings.quickEntryShortcut = shortcut
-          } else {
-            settings.pauseResumeShortcut = shortcut
-          }
-        }
+        apply(shortcut, to: slot)
       }
+      Button("Unset", role: .destructive) { apply(nil, to: slot) }
+        .disabled(isShortcutDisabled(slot))
     }
+  }
+
+  private func apply(_ shortcut: Shortcut?, to slot: HotKeySlot) {
+    if let message = updateHotKey(slot, shortcut) {
+      error = message
+      return
+    }
+    error = nil
+    if slot == .quickEntry {
+      settings.quickEntryShortcut = shortcut
+      settings.quickEntryShortcutIsDisabled = shortcut == nil
+    } else {
+      settings.pauseResumeShortcut = shortcut
+      settings.pauseResumeShortcutIsDisabled = shortcut == nil
+    }
+  }
+
+  private func isShortcutDisabled(_ slot: HotKeySlot) -> Bool {
+    slot == .quickEntry ? settings.quickEntryShortcutIsDisabled : settings.pauseResumeShortcutIsDisabled
+  }
+
+  private func shortcutDescription(for value: String, slot: HotKeySlot) -> String {
+    isShortcutDisabled(slot) ? "Unset" : "⌘⇧\(keyName(for: value))"
   }
 
   private func keyName(for value: String) -> String {

@@ -148,19 +148,22 @@ import UserNotifications
           guard let state else { return }
           state.perform { await state.togglePriorityTimer() }
         })
-      try keys.register(
-        preferences.quickEntryShortcut
-          ?? Shortcut(keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey)),
-        for: .quickEntry)
-      try keys.register(
-        preferences.pauseResumeShortcut
-          ?? Shortcut(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | shiftKey)),
-        for: .pauseResumePriority)
+      if !preferences.quickEntryShortcutIsDisabled {
+        try keys.register(
+          preferences.quickEntryShortcut
+            ?? Shortcut(keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey)),
+          for: .quickEntry)
+      }
+      if !preferences.pauseResumeShortcutIsDisabled {
+        try keys.register(
+          preferences.pauseResumeShortcut
+            ?? Shortcut(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | shiftKey)),
+          for: .pauseResumePriority)
+      }
       guard lifecycle.startResult(.success).contains(.createResources) else { return }
       statusController = controller
       self.state = state
       hotKeys = keys
-      controller.showNow(focusEntry: state.activeTimers.isEmpty)
       if preferences.launchesAtLogin {
         _ = state.changeLogin(true, apply: { self.setLogin(enabled: $0) })
       }
@@ -181,12 +184,13 @@ import UserNotifications
     failureController = nil
     operations.submit { await self.start() }
   }
-  private func replaceHotKey(_ shortcut: Shortcut, for slot: HotKeySlot) -> String? {
+  private func replaceHotKey(_ shortcut: Shortcut?, for slot: HotKeySlot) -> String? {
     guard let hotKeys else {
       return "Shortcuts are unavailable while starting or closing. Try again when ready."
     }
     do {
-      try hotKeys.register(shortcut, for: slot)
+      if let shortcut { try hotKeys.register(shortcut, for: slot) }
+      else { try hotKeys.unregister(for: slot) }
       return nil
     } catch { return "Could not use that shortcut. The previous shortcut is unchanged." }
   }

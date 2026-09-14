@@ -180,13 +180,15 @@ public final class AppState: ObservableObject {
   }
 
   public func changeHotKey(
-    _ shortcut: Shortcut, slot: HotKeySlot, apply: (HotKeySlot, Shortcut) -> String?
+    _ shortcut: Shortcut?, slot: HotKeySlot, apply: (HotKeySlot, Shortcut?) -> String?
   ) -> String? {
     var value = preferences
     if slot == .quickEntry {
       value.quickEntryShortcut = shortcut
+      value.quickEntryShortcutIsDisabled = shortcut == nil
     } else {
       value.pauseResumeShortcut = shortcut
+      value.pauseResumeShortcutIsDisabled = shortcut == nil
     }
     hotKeyError = commitSystemSetting(value) { apply(slot, shortcut) }
     return hotKeyError

@@ -4,17 +4,22 @@ import SwiftUI
 import TopTimerDomain
 import TopTimerSystem
 
-@MainActor public final class StatusBarController: NSObject {
+@MainActor public final class StatusBarController: NSObject, NSPopoverDelegate {
+  private static let quickEntryPopoverSize = NSSize(width: 276, height: 110)
   private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
   private let sounds = SoundCatalogState()
+  private let popover = NSPopover()
   private let state: AppState
   private let windows = WindowCoordinator()
-  private let updateHotKey: (HotKeySlot, Shortcut) -> String?
+  private let updateHotKey: (HotKeySlot, Shortcut?) -> String?
   private let updateLogin: (Bool) -> String?
   private let importSound: (URL) async throws -> String
   private var subscriptions = Set<AnyCancellable>()
+  private var showingList = false
+  private var shortcutOrigin: NSRunningApplication?
+  var popoverForTesting: NSPopover { popover }
   public init(
-    state: AppState, updateHotKey: @escaping (HotKeySlot, Shortcut) -> String? = { _, _ in nil },
+    state: AppState, updateHotKey: @escaping (HotKeySlot, Shortcut?) -> String? = { _, _ in nil },
     updateLogin: @escaping (Bool) -> String? = { _ in nil },
     importSound: @escaping (URL) async throws -> String = { _ in
       throw CocoaError(.fileReadUnsupportedScheme)
@@ -25,6 +30,8 @@ import TopTimerSystem
     self.updateLogin = updateLogin
     self.importSound = importSound
     super.init()
+    popover.behavior = .transient
+    popover.delegate = self
     item.isVisible = true
     item.button?.isHidden = false
     item.button?.target = self
@@ -43,15 +50,32 @@ import TopTimerSystem
     windows.closeAll()
     NSStatusBar.system.removeStatusItem(item)
   }
-  @objc public func toggle() { showNow() }
-  public func openFromShortcut() { showNow(focusEntry: true) }
-  public func showNow(focusEntry: Bool = false) {
-    windows.show(kind: .now) { [weak self] in
-      NowView(state: self!.state, focusEntry: focusEntry,
-        openHistory: { [weak self] in self?.openHistory() },
-        openSettings: { [weak self] in self?.openSettings() })
-    }
+  @objc public func toggle() { popover.isShown ? close() : open() }
+  public func open() {
+    sounds.refresh()
+    let root = AnyView(
+      PopoverRoot(
+        state: state, sounds: sounds, showingList: showingList,
+        onListChange: { [weak self] value in self?.showingList = value },
+        closePopover: { [weak self] in self?.close() },
+        openSettings: { [weak self] in self?.openSettings() },
+        openTimerList: { [weak self] in self?.openTimerList() })
+      .frame(width: Self.quickEntryPopoverSize.width, height: Self.quickEntryPopoverSize.height,
+             alignment: .topLeading))
+    let host = NSHostingController(rootView: root)
+    host.preferredContentSize = Self.quickEntryPopoverSize
+    host.view.frame = NSRect(origin: .zero, size: Self.quickEntryPopoverSize)
+    popover.contentSize = Self.quickEntryPopoverSize
+    popover.contentViewController = host
+    guard let button = item.button else { return }
+    popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    NSApp.activate(ignoringOtherApps: true)
   }
+  public func openFromShortcut() {
+    shortcutOrigin = NSWorkspace.shared.frontmostApplication
+    open()
+  }
+  public func close() { popover.performClose(nil) }
   private func openSettings() {
     windows.show(kind: .settings) {
       SettingsWindowRoot(
@@ -59,7 +83,17 @@ import TopTimerSystem
         importSound: self.importSound)
     }
   }
+  private func openTimerList() {
+    close()
+    windows.show(kind: .timerList) { TimerListHost(state: self.state, sounds: self.sounds) }
+  }
   private func openHistory() { windows.show(kind: .history) { HistoryView(state: self.state) } }
+  public func popoverDidClose(_ notification: Notification) {
+    if let origin = shortcutOrigin {
+      origin.activate(options: [])
+      shortcutOrigin = nil
+    }
+  }
   private func render(_ timer: TimerItem?) {
     let title = StatusTitleFormatter.format(
       timer: timer, now: .now, mode: state.preferences.statusDisplayMode,
@@ -77,7 +111,7 @@ import TopTimerSystem
 }
 struct SettingsWindowRoot: View {
   @ObservedObject var state: AppState
-  let updateHotKey: (HotKeySlot, Shortcut) -> String?
+  let updateHotKey: (HotKeySlot, Shortcut?) -> String?
   let updateLogin: (Bool) -> String?
   let importSound: (URL) async throws -> String
   var body: some View {

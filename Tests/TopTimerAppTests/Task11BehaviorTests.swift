@@ -148,6 +148,24 @@ private actor HistoryGate {
         }))
     XCTAssertFalse(applied)
   }
+
+  func testUnsettingAHotkeyDisablesItAndPersistsTheChoice() throws {
+    let data = RuntimeSettingsData()
+    let store = TopTimerSettingsStore(storage: data)
+    let state = AppState(
+      repository: RecordingRepository(), notifications: RecordingNotifications(), settingsStore: store)
+    let shortcut = try Shortcut(keyCode: 17, modifiers: 768)
+    XCTAssertNil(state.changeHotKey(shortcut, slot: .quickEntry, apply: { _, _ in nil }))
+
+    XCTAssertNil(state.changeHotKey(nil, slot: .quickEntry, apply: { _, value in
+      XCTAssertNil(value)
+      return nil
+    }))
+
+    XCTAssertNil(state.preferences.quickEntryShortcut)
+    XCTAssertTrue(state.preferences.quickEntryShortcutIsDisabled)
+    XCTAssertTrue(try store.load().quickEntryShortcutIsDisabled)
+  }
   func testReportsReadAllPagesAndRejectOversizeWithoutReplacingPriorReport() async throws {
     let repo = RecordingRepository()
     let entry = try makeHistory()

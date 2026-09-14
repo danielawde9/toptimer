@@ -66,6 +66,13 @@ public enum GlobalHotKeyControllerError: Error, Sendable, Equatable { case inval
         registrations[slot] = Registration(shortcut: shortcut, token: replacement)
     }
 
+    public func unregister(for slot: HotKeySlot) throws {
+        guard let registration = registrations[slot] else { return }
+        do { try registrar.unregister(registration.token) }
+        catch { throw Self.map(error) }
+        registrations.removeValue(forKey: slot)
+    }
+
     public func shutdown() throws {
         var failedSlots: [HotKeySlot] = []
         for slot in HotKeySlot.allCases {
