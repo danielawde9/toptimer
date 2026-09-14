@@ -5,7 +5,7 @@ import TopTimerDomain
 import TopTimerSystem
 
 @MainActor public final class StatusBarController: NSObject, NSPopoverDelegate {
-  private static let quickEntryPopoverSize = NSSize(width: 276, height: 110)
+  private static let quickEntryPopoverSize = NSSize(width: 276, height: 240)
   private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
   private let sounds = SoundCatalogState()
   private let popover = NSPopover()

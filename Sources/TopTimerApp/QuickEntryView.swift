@@ -86,9 +86,13 @@ public struct QuickEntryView: View {
   }
   @ViewBuilder private var suggestions: some View {
     if focused && !state.suggestions.isEmpty {
-      ForEach(Array(state.suggestions.prefix(20).enumerated()), id: \.offset) { pair in
-        suggestionButton(index: pair.offset, text: pair.element)
-      }
+      ScrollView {
+        VStack(alignment: .leading, spacing: 0) {
+          ForEach(Array(state.suggestions.prefix(20).enumerated()), id: \.offset) { pair in
+            suggestionButton(index: pair.offset, text: pair.element)
+          }
+        }
+      }.frame(maxHeight: 108)
     }
   }
   private func suggestionButton(index: Int, text: String) -> some View {
