@@ -5,7 +5,7 @@ import TopTimerDomain
 import TopTimerSystem
 
 @MainActor public final class StatusBarController: NSObject, NSPopoverDelegate {
-  private static let quickEntryPopoverSize = NSSize(width: 276, height: 240)
+  private static let quickEntryPopoverSize = NSSize(width: 320, height: 300)
   private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
   private let sounds = SoundCatalogState()
   private let popover = NSPopover()
@@ -15,7 +15,6 @@ import TopTimerSystem
   private let updateLogin: (Bool) -> String?
   private let importSound: (URL) async throws -> String
   private var subscriptions = Set<AnyCancellable>()
-  private var showingList = false
   private var shortcutOrigin: NSRunningApplication?
   var popoverForTesting: NSPopover { popover }
   public init(
@@ -54,12 +53,11 @@ import TopTimerSystem
   public func open() {
     sounds.refresh()
     let root = AnyView(
-      PopoverRoot(
-        state: state, sounds: sounds, showingList: showingList,
-        onListChange: { [weak self] value in self?.showingList = value },
-        closePopover: { [weak self] in self?.close() },
+      MenuBarPopoverView(
+        state: state,
         openSettings: { [weak self] in self?.openSettings() },
-        openTimerList: { [weak self] in self?.openTimerList() })
+        openTimers: { [weak self] in self?.openTimerList() },
+        quit: { NSApp.terminate(nil) })
       .frame(width: Self.quickEntryPopoverSize.width, height: Self.quickEntryPopoverSize.height,
              alignment: .topLeading))
     let host = NSHostingController(rootView: root)

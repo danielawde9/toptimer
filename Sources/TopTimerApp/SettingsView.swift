@@ -73,8 +73,7 @@ public struct SettingsView: View {
   private let updateSound: ((String?) async -> Bool)?
   private let additionalContent: AnyView
   @State private var error: String?
-  @State private var quickKeyCode = "17"
-  @State private var pauseKeyCode = "35"
+  @State private var recordingSlot: HotKeySlot?
 
   public init(
     settings: Binding<TopTimerSettings>, notificationDenied: Bool = false,
@@ -109,9 +108,8 @@ public struct SettingsView: View {
         Toggle("Use 24-hour time", isOn: $settings.uses24HourTime)
       }
       Section("Shortcuts") {
-        shortcutRow("Open quick entry", text: $quickKeyCode, slot: .quickEntry)
-        shortcutRow(
-          "Pause or resume priority timer", text: $pauseKeyCode, slot: .pauseResumePriority)
+        shortcutRow("Open quick entry", slot: .quickEntry)
+        shortcutRow("Pause or resume priority timer", slot: .pauseResumePriority)
       }
       Section("Alerts") {
         Picker(
@@ -164,31 +162,23 @@ public struct SettingsView: View {
     .padding()
     .frame(minWidth: 460, minHeight: 360)
     .accessibilityIdentifier("settings-view")
-    .onAppear {
-      quickKeyCode = String(settings.quickEntryShortcut?.keyCode ?? 17)
-      pauseKeyCode = String(settings.pauseResumeShortcut?.keyCode ?? 35)
+    .sheet(isPresented: Binding(get: { recordingSlot != nil }, set: { if !$0 { recordingSlot = nil } })) {
+      ShortcutCaptureSheet(onCapture: { shortcut in
+        if let slot = recordingSlot { apply(shortcut, to: slot) }
+        recordingSlot = nil
+      }, cancel: { recordingSlot = nil })
     }
   }
 
-  private func shortcutRow(_ title: String, text: Binding<String>, slot: HotKeySlot) -> some View {
+  private func shortcutRow(_ title: String, slot: HotKeySlot) -> some View {
     HStack {
       VStack(alignment: .leading, spacing: 2) {
         Text(title)
-        Text(shortcutDescription(for: text.wrappedValue, slot: slot)).font(.caption).foregroundStyle(.secondary)
+        Text(shortcutDisplay(shortcut(for: slot))).font(.caption).foregroundStyle(.secondary)
       }
       Spacer()
-      TextField("Key code", text: text).frame(width: 64)
-      Button("Set") {
-        guard let code = UInt32(text.wrappedValue),
-          let shortcut = try? Shortcut(keyCode: code, modifiers: 768)
-        else {
-          error = "Enter a valid key code. The previous shortcut is unchanged."
-          return
-        }
-        apply(shortcut, to: slot)
-      }
-      Button("Unset", role: .destructive) { apply(nil, to: slot) }
-        .disabled(isShortcutDisabled(slot))
+      Button("Change…") { recordingSlot = slot }
+      if shortcut(for: slot) != nil { Button("Unset") { apply(nil, to: slot) } }
     }
   }
 
@@ -207,22 +197,8 @@ public struct SettingsView: View {
     }
   }
 
-  private func isShortcutDisabled(_ slot: HotKeySlot) -> Bool {
-    slot == .quickEntry ? settings.quickEntryShortcutIsDisabled : settings.pauseResumeShortcutIsDisabled
-  }
-
-  private func shortcutDescription(for value: String, slot: HotKeySlot) -> String {
-    isShortcutDisabled(slot) ? "Unset" : "⌘⇧\(keyName(for: value))"
-  }
-
-  private func keyName(for value: String) -> String {
-    let names: [String: String] = [
-      "0": "A", "1": "S", "2": "D", "3": "F", "4": "H", "5": "G", "6": "Z",
-      "7": "X", "8": "C", "9": "V", "11": "B", "12": "Q", "13": "W", "14": "E",
-      "15": "R", "16": "Y", "17": "T", "31": "O", "32": "U", "34": "I",
-      "35": "P", "37": "L", "38": "J", "40": "K", "45": "N", "46": "M"
-    ]
-    return names[value] ?? "key (value)"
+  private func shortcut(for slot: HotKeySlot) -> Shortcut? {
+    slot == .quickEntry ? settings.quickEntryShortcut : settings.pauseResumeShortcut
   }
 
   private func setLogin(_ enabled: Bool) {
