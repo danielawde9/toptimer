@@ -637,3 +637,19 @@ window height.
 **If changed:** Update the package verifier and any launch/login registration
 assumptions together with the identifier; a fixed-height Now surface would need
 another bounded overflow design.
+
+## 2026-09-14 — Adaptive menu-bar primary surface
+
+**Decision:** The menu-bar popover is TopTimer's primary surface. With no active
+timer it leads with start-entry; with an active timer it leads with that timer's
+state and actions. Persistent text actions keep Settings, All timers, and Quit
+reachable. Shortcut settings use readable shortcut capture rather than raw key
+codes.
+
+**Why:** The fixed 276 by 110 popover clipped its own navigation below growing
+suggestions, while icon-only controls and numeric key codes made core actions
+hard to discover.
+
+**If the client answers differently:** A timer-list-first home would move the
+start field behind a secondary action. Retaining direct code entry would require
+an explicit expert-mode affordance, input validation, and a non-wrapping layout.
