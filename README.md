@@ -25,7 +25,7 @@ is currently Apple silicon (`arm64`) only; no Intel (`x86_64`) binary is claimed
 
 ## Quick syntax
 
-Enter a command in the menu-bar popover and press Return or **Run**:
+Enter a command in the menu-bar popover and press Return or **Start**:
 
 | Input | Result |
 | --- | --- |
@@ -34,10 +34,35 @@ Enter a command in the menu-bar popover and press Return or **Run**:
 | `1h 20m` or `60s` | Compound or seconds countdown |
 | `1:30:45` | 1 hour, 30 minutes, 45 seconds |
 | `@3pm` or `@14:30` | Countdown to the next matching wall-clock time |
-| blank input + **Run** | Stopwatch starting at `00:00` |
+| `stopwatch reading #books` | Named stopwatch with the `books` tag |
+| blank input + **Start** | Stopwatch starting at `00:00` |
 
 Use the expanded editor to add or change descriptions, tags, recurrence, sound,
 and volume. Suggestions are local, keyboard navigable, and bounded to 20 results.
+In the popover, arrows select suggestions and Return starts the selection. Space
+pauses/resumes when the entry is blank or entirely selected. Escape clears the
+entry, then closes the popover when pressed again.
+
+## Sequential timers and cleanup
+
+Every app window has a **Go to** menu for Main window, Timers, Sequences, History,
+Reports and Settings. Timer editing is under a timer’s **Actions → Edit**; shortcut
+capture is under **Settings → Change…**.
+
+Open **Sequences** from the menu-bar popover or **Go to** menu. The initial tasks are
+15 minutes Task 1, 15 minutes Task 2, and 30 minutes Task 3. Edit their names or
+minutes, add/remove rows, keep **Repeat endlessly** selected, and choose **Start
+sequence**. Only the current task runs. Pause/Resume and Stop control the sequence.
+Each completed step goes to history; the saved sequence resumes on relaunch.
+Keep TopTimer running for automatic transitions. After quitting or a delayed
+wake-up, the next task starts when the app resumes.
+
+Use **Remove** beside a saved suggestion or **Clear saved suggestions** beneath
+them. Built-in example commands appear when there are no saved suggestions.
+In **All timers**, **Delete all timers** removes every timer while preserving
+history and suggestions. **Clear everything…** also removes history, deleted
+records, saved suggestions and the saved sequence; app settings and imported
+sounds stay. Both bulk actions ask for confirmation.
 
 ## Privacy
 
@@ -108,8 +133,14 @@ are intentionally outside this repository's local packaging command.
 
 ## Screenshots
 
-A screenshot is intentionally not committed until a native visual review confirms
-that no private timer text, notifications, file paths, or account details are visible.
-The approved future path is `docs/screenshots/toptimer-popover.png`.
+Native light and dark previews use isolated, synthetic timer data.
+
+![The menu-bar popover with a running Focus countdown](docs/screenshots/2026-09-30/popover-running-light.png)
+
+![The main window in dark mode with a running countdown, a paused stopwatch and a second running timer](docs/screenshots/2026-09-30/now-active-dark.png)
+
+![A running sequence of three tasks](docs/screenshots/2026-09-30/sequences-running-light.png)
+
+See the [full screen gallery and button verification](docs/screenshots/2026-09-30/README.md).
 
 TopTimer is available under the [MIT License](LICENSE).
