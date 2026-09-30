@@ -4,6 +4,24 @@ import XCTest
 @testable import TopTimerApp
 
 @MainActor final class OperationOwnerTests: XCTestCase {
+  func testSubmittedMutationsRunInOrderAcrossSuspensions() async throws {
+    let owner = AppOperationOwner()
+    var events: [String] = []
+    var gate: CheckedContinuation<Void, Never>?
+    let finished = expectation(description: "queued mutation finishes")
+    owner.submit {
+      events.append("create begins")
+      await withCheckedContinuation { gate = $0 }
+      events.append("create finishes")
+    }
+    owner.submit { events.append("clear"); finished.fulfill() }
+    try await Task.sleep(for: .milliseconds(30))
+    XCTAssertEqual(events, ["create begins"])
+    gate?.resume()
+    await fulfillment(of: [finished], timeout: 2)
+    XCTAssertEqual(events, ["create begins", "create finishes", "clear"])
+  }
+
   func testAppStateWorkFinishesRealCoreDataPersistenceBeforeClose() async throws {
     let store = try await CoreDataStore.inMemory()
     let repository = TimerCoreDataRepository(store: store)

@@ -39,6 +39,10 @@ extension NotificationController: TimerNotificationScheduling {
 /// every mutation is stored before it is reflected to the UI.
 @MainActor
 public final class AppState: ObservableObject {
+  @Published public internal(set) var sequenceSession: SequenceSession?
+  @Published public internal(set) var sequenceError: String?
+  @Published public internal(set) var clearingData = false
+  let sequenceCoordinator: SequenceCoordinator
   public let operations: AppOperationOwner
   public func perform(_ operation: @escaping @MainActor () async -> Void) {
     if !operations.submit(operation) {
@@ -46,13 +50,22 @@ public final class AppState: ObservableObject {
     }
   }
   @Published public private(set) var activeTimers: [TimerItem] = []
-  @Published public private(set) var startupRecovery: StartupRecovery = .none
+  @Published public internal(set) var startupRecovery: StartupRecovery = .none
   @Published public private(set) var deletedTimers: [TimerItem] = []
   @Published public var quickEntryText = ""
-  @Published public private(set) var inlineError: String?
-  @Published public private(set) var notificationStatus: NotificationScheduleStatus?
+  @Published public internal(set) var inlineError: String?
+  @Published public internal(set) var notificationStatus: NotificationScheduleStatus?
   @Published public private(set) var priorityTimer: TimerItem?
-  @Published public private(set) var selectedEditorTimer: TimerItem?
+  /// Running priority is used for scheduling; paused timers still need visible controls.
+  public var displayedTimer: TimerItem? {
+    priorityTimer ?? activeTimers.first { $0.state == .paused }
+      ?? activeTimers.first { $0.state == .running }
+  }
+  public var quickEntryExamples: [String] {
+    suggestions.isEmpty ? ["25m focus", "10m tea", "stopwatch reading"] : Array(suggestions.prefix(3))
+  }
+  public func dismissInlineError() { inlineError = nil }
+  @Published public internal(set) var selectedEditorTimer: TimerItem?
   @Published public private(set) var historyPage = HistoryPage(entries: [], nextCursor: nil)
   @Published public private(set) var recentlyDeletedHistory: [HistoryEntry] = []
   @Published public private(set) var historyLoading = false
@@ -105,11 +118,11 @@ public final class AppState: ObservableObject {
   private var shortcutPausedTimerID: UUID?
   private var togglingPriority = false
 
-  private let repository: any TimerRepository
-  private let notifications: any TimerNotificationScheduling
+  let repository: any TimerRepository
+  let notifications: any TimerNotificationScheduling
   private let alertSounds: AlertSoundController?
-  private let presets: (any PresetRepository)?
-  private let now: () -> Date
+  let presets: (any PresetRepository)?
+  let now: () -> Date
   private let parser: ((Date) -> TimerParser)?
 
   public init(
@@ -123,9 +136,11 @@ public final class AppState: ObservableObject {
     settingsRecoveryWarning: String? = nil,
     sleepController: SleepAssertionController? = nil,
     now: @escaping () -> Date = { .now },
-    parser: ((Date) -> TimerParser)? = nil
+    parser: ((Date) -> TimerParser)? = nil,
+    sequenceStorage: (any SequenceStorage)? = nil
   ) {
     self.repository = repository
+    self.sequenceCoordinator = SequenceCoordinator(repository: repository, storage: sequenceStorage ?? MemorySequenceStorage())
     self.operations = operations
     self.notifications = notifications
     self.alertSounds = alertSounds
@@ -250,6 +265,7 @@ public final class AppState: ObservableObject {
   /// Creates a running timer. The observable order is persist, schedule,
   /// publish; notification failures do not undo durable timer state.
   public func create(command: String) async {
+    guard !clearingData else { return }
     inlineError = nil
     let submittedAt = now()
     do {
@@ -285,7 +301,7 @@ public final class AppState: ObservableObject {
       await publishActive()
       // Presets are a convenience record. The durable timer has already
       // been published, so a preset failure cannot affect creation.
-      _ = try? await presets?.record(command: command, tags: parsed.tags, at: submittedAt)
+      if !clearingData { _ = try? await presets?.record(command: command, tags: parsed.tags, at: submittedAt) }
       quickEntryText = ""
       await refreshSuggestions(query: "")
     } catch let error as TimerParserError {
@@ -312,7 +328,7 @@ public final class AppState: ObservableObject {
   /// Re-reads durable state; it never decrements a UI-side counter.
   @discardableResult public func refresh(now date: Date) async -> Int {
     guard date.timeIntervalSinceReferenceDate.isFinite else { return 0 }
-    guard !refreshing else { return 0 }
+    guard !refreshing, !clearingData else { return 0 }
     refreshing = true
     defer { refreshing = false }
     var completedCount = 0
@@ -330,11 +346,13 @@ public final class AppState: ObservableObject {
         if let successor = outcome.successor { await scheduleAfterPersistence(successor) }
       }
     } catch { inlineError = "Could not refresh timers." }
+    await reconcileSequence(at: date)
     await publishActive(at: date)
+    if completedCount > 0 { await refreshHistoryConsumers() }
     return completedCount
   }
 
-  private func publishActive(at date: Date? = nil) async {
+  func publishActive(at date: Date? = nil) async {
     do {
       activeTimers = Array(try await repository.active(limit: 100).prefix(100))
       priorityTimer = try await repository.priority(at: date ?? now())
@@ -513,7 +531,7 @@ public final class AppState: ObservableObject {
     }
   }
 
-  private func refreshHistoryConsumers() async {
+  func refreshHistoryConsumers() async {
     await loadHistory()
     if reportsRequested {
       await loadReports(from: reportsFilter.from, through: reportsFilter.through)
@@ -611,7 +629,9 @@ public final class AppState: ObservableObject {
     do {
       _ = try await repository.cancel(id: id, at: now())
       await cancelAfterPersistence(id)
+      await reconcileSequence(at: now())
       await publishActive()
+      await refreshHistoryConsumers()
       return true
     } catch {
       inlineError = "Could not cancel timer."
@@ -624,7 +644,9 @@ public final class AppState: ObservableObject {
       let outcome = try await repository.complete(id, at: now())
       if outcome.completed != prior { await playCompletion(outcome.completed) }
       if let successor = outcome.successor { await scheduleAfterPersistence(successor) }
+      await reconcileSequence(at: now())
       await publishActive()
+      await refreshHistoryConsumers()
       return true
     } catch {
       inlineError = "Could not complete timer."
@@ -645,6 +667,10 @@ public final class AppState: ObservableObject {
   @discardableResult public func reconfigure(_ id: UUID, configuration: TimerConfiguration) async
     -> Bool
   {
+    if sequenceSession?.timer?.id == id && configuration.recurrence != .none {
+      inlineError = "Use Repeat endlessly in the sequence window instead of recurring an individual step."
+      return false
+    }
     do { try await notifications.validateSound(name: configuration.alertName) } catch {
       inlineError =
         "Could not use the selected sound. Previous settings are unchanged. \(error.localizedDescription)"
@@ -777,7 +803,7 @@ public final class AppState: ObservableObject {
     }
   }
 
-  private func cancelAfterPersistence(_ id: UUID) async {
+  func cancelAfterPersistence(_ id: UUID) async {
     do { try await notifications.cancel(timerID: id) } catch {
       inlineError = "Timer saved, but notification scheduling failed."
     }

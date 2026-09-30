@@ -128,52 +128,55 @@ public struct TimerEditorView: View {
     self.save = save
   }
   public var body: some View {
-    Form {
-      Text(draft.kind == .countdown ? "Timer type: Countdown" : "Timer type: Stopwatch")
-        .accessibilityLabel(
-          draft.kind == .countdown
-            ? "Timer type: Countdown, read only" : "Timer type: Stopwatch, read only")
-      TextField("Title", text: $draft.title).accessibilityIdentifier("timer-editor-title")
-      TextField("Details", text: $draft.details, axis: .vertical)
-      TextField(
-        "Tags",
-        text: Binding(
-          get: { draft.tags.joined(separator: ", ") },
-          set: {
-            draft.tags = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-          }))
-      if draft.kind == .countdown {
-        EditorNumberField("Duration (seconds)", value: $draft.duration).accessibilityIdentifier(
-          "timer-editor-duration")
-      }
-      recurrenceControls
-      Picker(
-        "Alert sound",
-        selection: Binding(
-          get: { draft.alertName ?? "" }, set: { draft.alertName = $0.isEmpty ? nil : $0 })
-      ) {
-        Text("Default").tag("")
-        ForEach(catalog.names, id: \.self) { Text($0).tag($0) }
-        if let selected = draft.alertName, !catalog.names.contains(selected) {
-          Text("Unavailable: \(selected)").tag(selected)
+    VStack(spacing: 0) {
+      Form {
+        Text(draft.kind == .countdown ? "Timer type: Countdown" : "Timer type: Stopwatch")
+          .accessibilityLabel(
+            draft.kind == .countdown
+              ? "Timer type: Countdown, read only" : "Timer type: Stopwatch, read only")
+        TextField("Title", text: $draft.title).accessibilityIdentifier("timer-editor-title")
+        TextField("Details", text: $draft.details, axis: .vertical)
+        TextField(
+          "Tags",
+          text: Binding(
+            get: { draft.tags.joined(separator: ", ") },
+            set: {
+              draft.tags = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            }))
+        if draft.kind == .countdown {
+          EditorNumberField("Duration (seconds)", value: $draft.duration).accessibilityIdentifier(
+            "timer-editor-duration")
         }
-      }
-      Slider(value: $draft.volume, in: 0...1) { Text("In-app alert volume") }
-      Text(
-        "This volume applies while TopTimer is running. macOS controls notification-banner volume in Sound settings."
-      ).font(.caption).foregroundStyle(.secondary)
-      if let message = error ?? draft.validationError() ?? soundError {
-        Text(message).foregroundStyle(.red).accessibilityLabel(message)
-      }
-    }.padding().frame(width: 360)
+        recurrenceControls
+        Picker(
+          "Alert sound",
+          selection: Binding(
+            get: { draft.alertName ?? "" }, set: { draft.alertName = $0.isEmpty ? nil : $0 })
+        ) {
+          Text("Default").tag("")
+          ForEach(catalog.names, id: \.self) { Text($0).tag($0) }
+          if let selected = draft.alertName, !catalog.names.contains(selected) {
+            Text("Unavailable: \(selected)").tag(selected)
+          }
+        }
+        Slider(value: $draft.volume, in: 0...1) { Text("In-app alert volume") }
+        Text(
+          "This volume applies while TopTimer is running. macOS controls notification-banner volume in Sound settings."
+        ).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        if let message = error ?? draft.validationError() ?? soundError {
+          Text(message).foregroundStyle(.red).accessibilityLabel(message)
+        }
+      }.padding(20)
+      Divider()
+      HStack {
+        Spacer()
+        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).help("Cancel")
+        Button("Save", action: submit).keyboardShortcut(.defaultAction).buttonStyle(
+          .borderedProminent
+        ).help("Save")
+      }.padding()
+    }.frame(width: 440).background(Color(nsColor: .windowBackgroundColor))
       .onChange(of: draft) { _ in error = nil }
-      .safeAreaInset(edge: .bottom) {
-        HStack {
-          Spacer()
-          Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-          Button("Save", action: submit).keyboardShortcut(.defaultAction)
-        }.padding()
-      }
   }
   private var soundError: String? {
     draft.alertName.map { catalog.names.contains($0) ? nil : "Choose an available alert sound." }

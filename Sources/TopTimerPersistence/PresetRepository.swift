@@ -82,10 +82,15 @@ public struct TimerPreset: Codable, Equatable, Sendable, Identifiable {
 }
 
 public protocol PresetRepository: Sendable {
+    func removeAllPresets() async throws
     func record(command: String, tags: [String], at: Date) async throws -> TimerPreset
     func suggestions(query: String, limit: Int) async throws -> [TimerPreset]
     func softDeletePreset(_ id: UUID, at: Date) async throws
     func recoverPreset(_ id: UUID) async throws
+}
+
+extension PresetRepository {
+    public func removeAllPresets() async throws { throw TimerRepositoryError.unsupportedOperation }
 }
 
 public enum PresetPayloadCodec {
@@ -123,6 +128,19 @@ private struct AnyCodingKey: CodingKey {
 }
 
 public actor PresetCoreDataRepository: PresetRepository {
+    public func removeAllPresets() async throws {
+        try await store.perform { context in
+            do {
+                let records = try context.fetch(NSFetchRequest<PresetRecord>(entityName: "PresetRecord"))
+                for record in records { context.delete(record) }
+                try context.save()
+            } catch {
+                context.rollback()
+                throw error
+            }
+        }
+    }
+
     private static let defaultMaximumStoredPresets = 10_000
     private let store: CoreDataStore
     private let maximumStoredPresets: Int

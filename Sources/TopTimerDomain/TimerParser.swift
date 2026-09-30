@@ -47,11 +47,12 @@ public struct TimerParser: Sendable {
             return ParsedTimer(kind: .stopwatch, duration: nil, deadline: nil, title: "", tags: [])
         }
 
-        let timing = try parseTiming(from: tokens)
+        let isStopwatch = tokens[0].lowercased() == "stopwatch"
+        let timing = isStopwatch ? nil : try parseTiming(from: tokens)
         var titleTokens: [String] = []
         var tags: [String] = []
 
-        for token in tokens.dropFirst(timing.consumedTokens) {
+        for token in tokens.dropFirst(timing?.consumedTokens ?? 1) {
             if token.contains("#") {
                 guard token.first == "#", token.count > 1, !token.dropFirst().contains("#") else {
                     throw TimerParserError.malformedTag
@@ -65,9 +66,9 @@ public struct TimerParser: Sendable {
         let title = titleTokens.joined(separator: " ")
         try validateMetadata(title: title, tags: tags)
         return ParsedTimer(
-            kind: .countdown,
-            duration: timing.duration,
-            deadline: timing.deadline,
+            kind: isStopwatch ? .stopwatch : .countdown,
+            duration: timing?.duration,
+            deadline: timing?.deadline,
             title: title,
             tags: tags
         )

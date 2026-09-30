@@ -36,6 +36,25 @@ final class TimerParserTests: XCTestCase {
         XCTAssertEqual(try parser.parse("   ").kind, .stopwatch)
     }
 
+    func testExplicitStopwatchExampleParsesTitleAndTags() throws {
+        let parsed = try TimerParser().parse("stopwatch reading #books")
+        XCTAssertEqual(parsed.kind, .stopwatch)
+        XCTAssertEqual(parsed.title, "reading")
+        XCTAssertEqual(parsed.tags, ["books"])
+        XCTAssertNil(parsed.duration)
+        XCTAssertNil(parsed.deadline)
+        XCTAssertEqual(try TimerParser().parse("STOPWATCH").kind, .stopwatch)
+    }
+
+    func testStopwatchStillValidatesMetadata() {
+        XCTAssertThrowsError(try TimerParser().parse("stopwatch #")) { error in
+            XCTAssertEqual(error as? TimerParserError, .malformedTag)
+        }
+        XCTAssertThrowsError(try TimerParser().parse("stopwatch " + String(repeating: "x", count: 81))) { error in
+            XCTAssertEqual(error as? TimerValidationError, .titleTooLong)
+        }
+    }
+
     func testInputIsBounded() {
         let parser = TimerParser(calendar: utcCalendar, now: fixedNow)
 

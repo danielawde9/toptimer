@@ -16,6 +16,10 @@ import XCTest
     let window = mount(host)
     defer { window.close() }
     try clickAction("Finish", in: host)
+    for _ in 0..<200 {
+      if try await repository.timer(id: id).state == .completed { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
     await settle(state)
     let timer = try await repository.timer(id: id)
     XCTAssertEqual(timer.state, .completed)
@@ -32,56 +36,42 @@ import XCTest
     try await store.close()
   }
 
-  func testBothListHostsPresentAndDismissEditorFromNativeEditAction() async throws {
-    for popover in [false, true] {
-      let state = AppState(
-        repository: RecordingRepository(), notifications: RecordingNotifications())
-      await state.create(command: "5m Editable")
-      let root: AnyView =
-        popover
-        ? AnyView(
-          PopoverRoot(
-            state: state, sounds: SoundCatalogState(), showingList: true, onListChange: { _ in },
-            closePopover: {}, openSettings: {}, openTimerList: {}))
-        : AnyView(TimerListHost(state: state, sounds: SoundCatalogState()))
-      let host = NSHostingView(rootView: root)
-      let window = mount(host)
-      let otherWindow = mount(
-        NSHostingView(rootView: TimerListHost(state: state, sounds: SoundCatalogState())))
-      defer { otherWindow.close() }
-      try clickAction("Edit", in: host)
-      for _ in 0..<100 {
-        if window.attachedSheet != nil { break }
-        try await Task.sleep(for: .milliseconds(10))
-      }
-      let sheet = try XCTUnwrap(window.attachedSheet)
-      XCTAssertNil(otherWindow.attachedSheet)
-      XCTAssertNotNil(state.selectedEditorTimer)
-      sheet.contentView?.layoutSubtreeIfNeeded()
-      let content = try XCTUnwrap(sheet.contentView)
-      XCTAssertTrue(
-        nodes(content).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "Editable" })
-      if let directory = ProcessInfo.processInfo.environment["TOPTIMER_FINAL_PROOF"],
-        let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds)
-      {
-        content.cacheDisplay(in: content.bounds, to: bitmap)
-        try bitmap.representation(using: .png, properties: [:])?.write(
-          to: URL(fileURLWithPath: directory).appendingPathComponent(
-            popover ? "popover-editor.png" : "window-editor.png"))
-      }
-      sheet.cancelOperation(nil)
-      for _ in 0..<100 {
-        if state.selectedEditorTimer == nil && window.attachedSheet == nil { break }
-        try await Task.sleep(for: .milliseconds(10))
-      }
-      XCTAssertNil(state.selectedEditorTimer)
-      XCTAssertNil(window.attachedSheet)
+  func testListHostOwnsAndDismissesEditorFromNativeEditAction() async throws {
+    let state = AppState(repository: RecordingRepository(), notifications: RecordingNotifications())
+    await state.create(command: "5m Editable")
+    let host = NSHostingView(rootView: TimerListHost(state: state, sounds: SoundCatalogState()))
+    let window = mount(host)
+    let otherWindow = mount(
+      NSHostingView(rootView: TimerListHost(state: state, sounds: SoundCatalogState())))
+    defer {
       window.close()
-      await state.operations.drain()
+      otherWindow.close()
     }
+    try clickAction("Edit", in: host)
+    for _ in 0..<100 {
+      if window.attachedSheet != nil { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    let sheet = try XCTUnwrap(window.attachedSheet)
+    XCTAssertNil(otherWindow.attachedSheet)
+    XCTAssertNotNil(state.selectedEditorTimer)
+    sheet.contentView?.layoutSubtreeIfNeeded()
+    let content = try XCTUnwrap(sheet.contentView)
+    XCTAssertTrue(
+      nodes(content).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "Editable" })
+    sheet.cancelOperation(nil)
+    for _ in 0..<100 {
+      if state.selectedEditorTimer == nil && window.attachedSheet == nil { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    XCTAssertNil(state.selectedEditorTimer)
+    XCTAssertNil(window.attachedSheet)
+    await state.operations.drain()
   }
 
   private func settle(_ state: AppState) async {
+    // Native menu dispatch enqueues its SwiftUI action on the next run-loop turn.
+    try? await Task.sleep(for: .milliseconds(30))
     for _ in 0..<100 {
       if state.operations.pendingCount == 0 { return }
       try? await Task.sleep(for: .milliseconds(10))
@@ -107,6 +97,7 @@ import XCTest
     }
     RunLoop.main.add(trigger, forMode: .eventTracking)
     RunLoop.main.add(trigger, forMode: .common)
+    host.window?.makeKeyAndOrderFront(nil)
     popup.performClick(nil)
   }
   private func mount<V: View>(_ host: NSHostingView<V>) -> NSWindow {

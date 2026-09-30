@@ -5,6 +5,12 @@ import TopTimerDomain
 @testable import TopTimerPersistence
 
 final class TimerRepositoryTests: XCTestCase {
+    func testLegacyTimerConformerRejectsUnsupportedBulkCleanup() async {
+        let repository: any TimerRepository = ProtocolRepositoryFake()
+        await XCTAssertThrowsErrorAsync({ _ = try await repository.removeAllTimers() }, matching: .unsupportedOperation)
+        await XCTAssertThrowsErrorAsync({ _ = try await repository.clearAllData() }, matching: .unsupportedOperation)
+    }
+
     func testAcknowledgedIsNotDeletedAndCannotBeRestored() async throws {
         let repository = try await repository()
         var timer = try countdown(); try timer.start(at: created)

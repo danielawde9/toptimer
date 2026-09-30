@@ -133,7 +133,8 @@ import UserNotifications
         alertSounds: soundController, operations: operations,
         settingsStore: settingsStore, initialPreferences: preferences,
         settingsRecoveryWarning: recovered.warning,
-        sleepController: sleepController)
+        sleepController: sleepController,
+        sequenceStorage: JSONSequenceStorage(url: folder.appendingPathComponent("sequence.json")))
       await state.load()
       guard operations.accepting else { return }
       installNotificationResponses(state: state, center: UNUserNotificationCenter.current())
@@ -148,17 +149,11 @@ import UserNotifications
           guard let state else { return }
           state.perform { await state.togglePriorityTimer() }
         })
-      if !preferences.quickEntryShortcutIsDisabled {
-        try keys.register(
-          preferences.quickEntryShortcut
-            ?? Shortcut(keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey)),
-          for: .quickEntry)
+      if let shortcut = preferences.effectiveShortcut(for: .quickEntry) {
+        try keys.register(shortcut, for: .quickEntry)
       }
-      if !preferences.pauseResumeShortcutIsDisabled {
-        try keys.register(
-          preferences.pauseResumeShortcut
-            ?? Shortcut(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | shiftKey)),
-          for: .pauseResumePriority)
+      if let shortcut = preferences.effectiveShortcut(for: .pauseResumePriority) {
+        try keys.register(shortcut, for: .pauseResumePriority)
       }
       guard lifecycle.startResult(.success).contains(.createResources) else { return }
       statusController = controller

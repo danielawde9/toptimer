@@ -7,6 +7,8 @@ import SwiftUI
   let suggestions: [String]
   let focus: Bool
   let command: (QuickEntryEffect) -> Void
+  var focusRequest = 0
+  var placeholder = "15m Focus"
   func makeCoordinator() -> Coordinator { Coordinator(self) }
   func makeNSView(context: Context) -> Field {
     let field = Field()
@@ -17,11 +19,12 @@ import SwiftUI
     field.drawsBackground = false
     field.commandCoordinator = context.coordinator
     field.delegate = context.coordinator
-    field.placeholderString = "15m Focus"
+    field.placeholderString = placeholder
     field.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
     field.focusRingType = .default
     field.target = context.coordinator
     field.action = #selector(Coordinator.submit)
+    field.setAccessibilityLabel("Start a timer")
     field.setAccessibilityIdentifier("quick-entry")
     return field
   }
@@ -29,19 +32,30 @@ import SwiftUI
     context.coordinator.parent = self
     if field.stringValue != text { field.stringValue = text }
     field.requestsInitialFocus = focus
+    field.updateFocusRequest(focusRequest)
     field.focusIfNeeded()
   }
 
   final class Field: NSTextField {
     var requestsInitialFocus = false
     private var didFocus = false
+    private var lastFocusRequest = 0
+    func updateFocusRequest(_ request: Int) {
+      if request != lastFocusRequest {
+        didFocus = false
+        lastFocusRequest = request
+      }
+    }
     weak var commandCoordinator: Coordinator?
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
       focusIfNeeded()
     }
     func focusIfNeeded() {
-      guard requestsInitialFocus else { didFocus = false; return }
+      guard requestsInitialFocus else {
+        didFocus = false
+        return
+      }
       guard !didFocus, let window else { return }
       didFocus = window.makeFirstResponder(self)
     }
@@ -64,8 +78,12 @@ import SwiftUI
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
       let inserted = (insertString as? String) ?? (insertString as? NSAttributedString)?.string
       if inserted == " ", !hasMarkedText(), let field,
-        field.commandCoordinator?.handle(NSSelectorFromString("insertSpace:"), field: field,
-          editor: self) == true { return }
+        field.commandCoordinator?.handle(
+          NSSelectorFromString("insertSpace:"), field: field,
+          editor: self) == true
+      {
+        return
+      }
       super.insertText(insertString, replacementRange: replacementRange)
     }
   }
@@ -77,11 +95,14 @@ import SwiftUI
       parent.text = field.stringValue
     }
     @objc func submit() { parent.command(.run(selectedSuggestion: false)) }
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool
+    {
       guard let field = control as? NSTextField else { return false }
       return handle(selector, field: field, editor: textView)
     }
-    func handle(_ selector: Selector, field: NSTextField, editor suppliedEditor: NSTextView? = nil) -> Bool {
+    func handle(_ selector: Selector, field: NSTextField, editor suppliedEditor: NSTextView? = nil)
+      -> Bool
+    {
       let command: QuickEntryCommand?
       switch selector {
       case #selector(NSResponder.moveUp(_:)): command = .up

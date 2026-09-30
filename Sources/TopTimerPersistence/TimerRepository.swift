@@ -4,6 +4,7 @@ import TopTimerDomain
 
 public enum TimerRepositoryError: Error, Equatable, Sendable {
     case invalidCreation
+    case unsupportedOperation
     case invalidRestore
     case timerNotFound
     case unsupportedPayloadVersion(Int)
@@ -18,6 +19,8 @@ public enum TimerRepositoryError: Error, Equatable, Sendable {
 }
 
 public protocol TimerRepository: Sendable {
+    func removeAllTimers() async throws -> [UUID]
+    func clearAllData() async throws -> [UUID]
     func insert(_ timer: TimerItem) async throws -> TimerItem
     func update(_ timer: TimerItem) async throws
     func active(limit: Int) async throws -> [TimerItem]
@@ -41,6 +44,8 @@ public protocol TimerRepository: Sendable {
 }
 
 extension TimerRepository {
+    public func removeAllTimers() async throws -> [UUID] { throw TimerRepositoryError.unsupportedOperation }
+    public func clearAllData() async throws -> [UUID] { throw TimerRepositoryError.unsupportedOperation }
     public func deletedHistory(limit: Int) async throws -> [HistoryEntry] { [] }
 }
 
@@ -176,6 +181,35 @@ public enum TimerPayloadCodec {
 }
 
 public actor TimerCoreDataRepository: TimerRepository {
+    public func removeAllTimers() async throws -> [UUID] {
+        try await removeRecords(includingHistoryAndPresets: false)
+    }
+
+    public func clearAllData() async throws -> [UUID] {
+        try await removeRecords(includingHistoryAndPresets: true)
+    }
+
+    private func removeRecords(includingHistoryAndPresets: Bool) async throws -> [UUID] {
+        try await store.perform { context in
+            do {
+                let timers = try context.fetch(NSFetchRequest<TimerRecord>(entityName: "TimerRecord"))
+                let removedIDs = timers.map(\.id)
+                for record in timers { context.delete(record) }
+                if includingHistoryAndPresets {
+                    for entity in ["HistoryRecord", "PresetRecord"] {
+                        let records = try context.fetch(NSFetchRequest<NSManagedObject>(entityName: entity))
+                        for record in records { context.delete(record) }
+                    }
+                }
+                try context.save()
+                return removedIDs
+            } catch {
+                context.rollback()
+                throw error
+            }
+        }
+    }
+
     public func deletedHistory(limit: Int) async throws -> [HistoryEntry] {
         let limit = Self.boundedLimit(limit)
         return try await store.perform { context in

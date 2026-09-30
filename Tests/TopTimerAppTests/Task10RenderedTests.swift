@@ -103,18 +103,19 @@ final class Task10RenderedTests: XCTestCase {
       "Recurrence, weekday, sound; kind is read only")
   }
 
-  func testQuickToolbarHasExactlyFourAccessibleControlsWithRunningTimer() async {
+  func testPopoverUsesOneAccessibleEntryWithRunningTimer() async throws {
     let state = AppState(repository: RecordingRepository(), notifications: RecordingNotifications())
     await state.create(command: "5m Tea")
-    let host = NSHostingView(rootView: QuickEntryView(state: state, showingList: .constant(false)))
+    let host = NSHostingView(
+      rootView: MenuBarPopoverView(state: state, openSettings: {}, openTimers: {}, quit: {}))
     let window = mount(host)
     defer { window.close() }
-    let buttons = accessibilityNodes(host).compactMap { $0 as? NSButton }
-    XCTAssertEqual(buttons.count, 4)
-    for button in buttons {
-      XCTAssertGreaterThanOrEqual(button.frame.width, 28)
-      XCTAssertGreaterThanOrEqual(button.frame.height, 28)
-    }
+    let fields = accessibilityNodes(host).compactMap { $0 as? QuickEntryTextField.Field }
+    XCTAssertEqual(fields.count, 1)
+    let field = try XCTUnwrap(fields.first)
+    XCTAssertEqual(field.accessibilityLabel(), "Start a timer")
+    XCTAssertGreaterThanOrEqual(field.frame.width, 28)
+    XCTAssertGreaterThan(field.frame.height, 0)
   }
 
   private func mount<V: View>(_ host: NSHostingView<V>, name: String = #function) -> NSWindow {

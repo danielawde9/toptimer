@@ -13,8 +13,8 @@ public struct ReportsView: View {
       HStack {
         DatePicker("From", selection: $from, displayedComponents: .date)
         DatePicker("Through", selection: $through, displayedComponents: .date)
-        Button("Update") { load() }
-      }.padding()
+        Button("Update") { load() }.buttonStyle(.borderedProminent).help("Update")
+      }.padding(.bottom, 12)
       if state.reportsLoading {
         VStack {
           ProgressView("Loading report…")
@@ -26,14 +26,13 @@ public struct ReportsView: View {
           Button("Try again") { load() }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if rows.isEmpty {
-        VStack {
-          Text("No timer activity in this range")
-          Button("Choose last 30 days") {
+        EmptyStateView(title: "No timer activity in this range", symbol: "chart.bar.fill",
+          detail: "Try a different date range or choose the last 30 days to see your activity.",
+          actionTitle: "Choose last 30 days") {
             through = .now
             from = Calendar.current.date(byAdding: .day, value: -30, to: through) ?? through
             load()
-          }
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
       } else {
         Text("Daily totals").font(.headline)
         Chart(daily, id: \.date) { item in
@@ -49,9 +48,10 @@ public struct ReportsView: View {
         HStack {
           totalsTable("Timers", values: timerTotals)
           totalsTable("Tags", values: tagTotals)
-        }
+        }.frame(minHeight: 140)
       }
-    }.padding().frame(minWidth: 680, minHeight: 500).accessibilityIdentifier("reports-view")
+    }.padding(20).frame(minWidth: 680, minHeight: 580).background(Color(nsColor: .windowBackgroundColor))
+      .accessibilityIdentifier("reports-view")
       .onAppear { load() }
   }
   private var rows: [HistoryEntry] { state.reportEntries }

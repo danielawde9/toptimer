@@ -3,123 +3,150 @@ import TopTimerDomain
 
 public struct NowView: View {
   @ObservedObject private var state: AppState
-  private let openHistory: () -> Void
-  private let openSettings: () -> Void
+  private let navigate: ((TopTimerWindow) -> Void)?
   private let focusEntry: Bool
   @FocusState private var entryFocused: Bool
 
-  public init(state: AppState, focusEntry: Bool = false, openHistory: @escaping () -> Void = {}, openSettings: @escaping () -> Void = {}) {
-    self.state = state; self.focusEntry = focusEntry; self.openHistory = openHistory
-    self.openSettings = openSettings
+  public init(
+    state: AppState, focusEntry: Bool = false, navigate: ((TopTimerWindow) -> Void)? = nil
+  ) {
+    self.state = state
+    self.focusEntry = focusEntry
+    self.navigate = navigate
   }
 
   public var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 16) {
-        HStack {
-          Text("TopTimer").font(.title2.bold()); Spacer()
-          Button("History", action: openHistory); Button("Settings", action: openSettings)
-        }
-        HStack {
+      VStack(alignment: .leading, spacing: 20) {
+        Text("TopTimer").font(.title.bold())
+        HStack(spacing: 10) {
           TextField("Start a timer, e.g. 25m focus", text: $state.quickEntryText)
-            .focused($entryFocused).onSubmit { startEntry() }.accessibilityLabel("Timer entry")
-          Button("Start", action: startEntry).keyboardShortcut(.return, modifiers: [])
-        }
+            .textFieldStyle(.roundedBorder).focused($entryFocused).onSubmit(startEntry)
+            .accessibilityLabel("Timer entry")
+          Button("Start", action: startEntry).buttonStyle(.borderedProminent).help("Start")
+            .keyboardShortcut(.return, modifiers: [])
+        }.controlSize(.large)
+        recovery
         if state.activeTimers.isEmpty {
-          Text("Start a timer").font(.headline)
-          HStack {
-            example("25m focus"); example("10m tea"); example("stopwatch reading")
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Start a timer").font(.headline)
+            ForEach(state.quickEntryExamples, id: \.self) { text in
+              Button(text) {
+                state.quickEntryText = text
+                startEntry()
+              }
+              .buttonStyle(.borderless).help(text)
+            }
           }
         }
-        recovery
         if let timer = primaryTimer { primary(timer) }
-        if state.activeTimers.count > 1 {
+        let otherTimers = state.activeTimers.filter { $0.id != primaryTimer?.id }
+        if !otherTimers.isEmpty {
+          Divider()
           Text("Other active timers").font(.headline)
-          ForEach(state.activeTimers.filter { $0.id != primaryTimer?.id }.prefix(3), id: \.id) { timer in secondary(timer) }
+          ForEach(otherTimers, id: \.id) { timer in
+            secondary(timer)
+            Divider()
+          }
         }
       }.padding(24)
     }.frame(minWidth: 460, minHeight: 360, alignment: .topLeading)
+      .background(Color(nsColor: .windowBackgroundColor))
       .onAppear { entryFocused = focusEntry && state.activeTimers.isEmpty }
-  }
-
-  private func example(_ text: String) -> some View {
-    Button(text) { state.quickEntryText = text; startEntry() }.buttonStyle(.link)
   }
 
   @ViewBuilder private var recovery: some View {
     if let message = state.startupRecovery.message {
-      HStack { Text(message).font(.callout); Button("History") { state.dismissStartupRecovery(); openHistory() } }
-        .padding(8).background(.secondary.opacity(0.12)).cornerRadius(6)
-    }
-    if state.notificationStatus == .authorizationDenied || state.notificationStatus == .notAuthorized(.denied) {
       HStack {
-        Text("Notifications are denied.").font(.caption).foregroundStyle(.orange)
-        Button("Open Settings", action: openSettings)
-      }
+        Text(message).font(.callout)
+        if let navigate {
+          Button("View history") {
+            state.dismissStartupRecovery()
+            navigate(.history)
+          }.help("View recovered history")
+        } else {
+          Button("Dismiss") { state.dismissStartupRecovery() }
+        }
+      }.padding(8).background(
+        Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+    }
+    if state.notificationStatus == .authorizationDenied
+      || state.notificationStatus == .notAuthorized(.denied)
+    {
+      Text("Notifications are denied. Enable TopTimer notifications in macOS System Settings.")
+        .font(.caption).foregroundStyle(.orange)
     }
     if let error = state.inlineError {
-      HStack { Text(error).font(.caption).foregroundStyle(.red); Button("Retry") { entryFocused = true; startEntry() } }
+      TimerOperationMessage(message: error, dismiss: state.dismissInlineError)
     }
   }
 
   private func primary(_ timer: TimerItem) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text(timer.title.isEmpty ? (timer.kind == .stopwatch ? "Stopwatch" : "Timer") : timer.title).font(.title3.bold())
-      TimelineView(.periodic(from: .now, by: 1)) { context in
-        let timing = TimerRowTiming(timer: timer, at: context.date)
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
         VStack(alignment: .leading, spacing: 6) {
-          Text(statusText(for: timer)).accessibilityAddTraits(.isHeader)
-          Text(timing.text).monospacedDigit().font(.title2).accessibilityLabel("\(statusText(for: timer)), \(timing.text)")
-          ProgressView(value: timing.progress)
-          HStack {
-            if timer.state == .paused {
-              Button("Resume") { state.perform { _ = await state.resume(timer.id) } }
-              terminalAction(timer)
-            } else if timer.state == .running {
-              Button("Pause") { state.perform { _ = await state.pause(timer.id) } }
-              terminalAction(timer)
-            } else {
-              Text("No active controls").foregroundStyle(.secondary)
-            }
-          }
+          Text(title(timer)).font(.title2.bold()).lineLimit(1)
+          TimerStatusLabel(timer: timer)
+        }
+        Spacer()
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+          TimerTimeBadge(timer: timer, date: context.date, prominent: true)
+        }
+      }
+      if timer.kind == .countdown {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+          ProgressView(value: TimerRowTiming(timer: timer, at: context.date).progress)
+        }
+      }
+      HStack(spacing: 8) {
+        controls(timer)
+        if timer.state == .idle {
+          Button("Start") { state.perform { _ = await state.start(timer.id) } }.help("Start timer")
+        }
+        if timer.state == .completed {
+          Button("Acknowledge") { state.perform { _ = await state.acknowledge(timer.id) } }.help(
+            "Acknowledge")
         }
       }
     }.accessibilityElement(children: .contain)
   }
 
   private func secondary(_ timer: TimerItem) -> some View {
-    HStack {
-      VStack(alignment: .leading) { Text(timer.title.isEmpty ? "Untitled timer" : timer.title); Text(timer.state == .paused ? "Paused" : "Running").font(.caption) }
-      Spacer(); Text(TimerRowTiming(timer: timer, at: .now).text).monospacedDigit()
-      if timer.state == .paused {
-        Button("Resume") { state.perform { _ = await state.resume(timer.id) } }
-      } else if timer.state == .running {
-        Button("Pause") { state.perform { _ = await state.pause(timer.id) } }
+    HStack(spacing: 12) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(title(timer)).fontWeight(.semibold).lineLimit(1)
+        TimerStatusLabel(timer: timer)
       }
-      if timer.state == .running || timer.state == .paused {
-        terminalAction(timer)
+      Spacer(minLength: 4)
+      TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimerTimeBadge(timer: timer, date: context.date)
       }
-    }.padding(.vertical, 4)
+      controls(timer)
+    }.padding(.vertical, 4).controlSize(.small)
   }
 
-  @ViewBuilder private func terminalAction(_ timer: TimerItem) -> some View {
-    if timer.kind == .stopwatch {
-      Button("Finish") { state.perform { _ = await state.complete(timer.id) } }
-    } else {
-      Button("Stop") { state.perform { _ = await state.cancel(timer.id) } }
+  @ViewBuilder private func controls(_ timer: TimerItem) -> some View {
+    if timer.state == .paused || timer.state == .running {
+      Button(timer.state == .paused ? "Resume" : "Pause") {
+        state.perform {
+          _ = timer.state == .paused ? await state.resume(timer.id) : await state.pause(timer.id)
+        }
+      }.buttonStyle(.borderedProminent).help(timer.state == .paused ? "Resume" : "Pause")
+      Button(timer.kind == .stopwatch ? "Finish" : "Stop") {
+        state.perform {
+          _ =
+            timer.kind == .stopwatch ? await state.complete(timer.id) : await state.cancel(timer.id)
+        }
+      }.help(timer.kind == .stopwatch ? "Finish" : "Stop")
     }
   }
 
-  private func startEntry() { let command = state.quickEntryText; state.perform { await state.create(command: command) } }
-  private var primaryTimer: TimerItem? { state.priorityTimer ?? state.activeTimers.first }
-  private func statusText(for timer: TimerItem) -> String {
-    switch timer.state {
-    case .running: "Running"
-    case .paused: "Paused"
-    case .completed: "Finished"
-    case .cancelled: "Stopped"
-    case .acknowledged: "Completed"
-    case .idle: "Not started"
-    }
+  private func title(_ timer: TimerItem) -> String {
+    timer.title.isEmpty ? (timer.kind == .stopwatch ? "Stopwatch" : "Timer") : timer.title
   }
+  private func startEntry() {
+    let command = state.quickEntryText
+    state.perform { await state.create(command: command) }
+  }
+  private var primaryTimer: TimerItem? { state.displayedTimer ?? state.activeTimers.first }
 }

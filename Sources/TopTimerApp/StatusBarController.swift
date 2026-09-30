@@ -29,6 +29,17 @@ import TopTimerSystem
     self.updateLogin = updateLogin
     self.importSound = importSound
     super.init()
+    windows.navigate = { [weak self] kind in
+      guard let self else { return }
+      switch kind {
+      case .now: self.openNow()
+      case .timerList: self.openTimerList()
+      case .history: self.openHistory()
+      case .reports: self.openReports()
+      case .settings: self.openSettings()
+      case .sequences: self.openSequences()
+      }
+    }
     popover.behavior = .transient
     popover.delegate = self
     item.isVisible = true
@@ -57,9 +68,14 @@ import TopTimerSystem
         state: state,
         openSettings: { [weak self] in self?.openSettings() },
         openTimers: { [weak self] in self?.openTimerList() },
-        quit: { NSApp.terminate(nil) })
-      .frame(width: Self.quickEntryPopoverSize.width, height: Self.quickEntryPopoverSize.height,
-             alignment: .topLeading))
+        quit: { NSApp.terminate(nil) },
+        openNow: { [weak self] in self?.openNow() },
+        openSequences: { [weak self] in self?.openSequences() },
+        closePopover: { [weak self] in self?.close() }
+      )
+      .frame(
+        width: Self.quickEntryPopoverSize.width, height: Self.quickEntryPopoverSize.height,
+        alignment: .topLeading))
     let host = NSHostingController(rootView: root)
     host.preferredContentSize = Self.quickEntryPopoverSize
     host.view.frame = NSRect(origin: .zero, size: Self.quickEntryPopoverSize)
@@ -75,6 +91,7 @@ import TopTimerSystem
   }
   public func close() { popover.performClose(nil) }
   private func openSettings() {
+    close()
     windows.show(kind: .settings) {
       SettingsWindowRoot(
         state: self.state, updateHotKey: self.updateHotKey, updateLogin: self.updateLogin,
@@ -83,9 +100,28 @@ import TopTimerSystem
   }
   private func openTimerList() {
     close()
-    windows.show(kind: .timerList) { TimerListHost(state: self.state, sounds: self.sounds) }
+    windows.show(kind: .timerList) {
+      TimerListHost(state: self.state, sounds: self.sounds)
+    }
   }
-  private func openHistory() { windows.show(kind: .history) { HistoryView(state: self.state) } }
+  private func openNow() {
+    close()
+    windows.show(kind: .now) {
+      NowView(
+        state: self.state, focusEntry: true,
+        navigate: { [weak self] in self?.windows.navigate?($0) })
+    }
+  }
+  private func openSequences() {
+    close()
+    windows.show(kind: .sequences) { SequenceView(state: self.state) }
+  }
+  private func openHistory() {
+    windows.show(kind: .history) {
+      HistoryView(state: self.state)
+    }
+  }
+  private func openReports() { windows.show(kind: .reports) { ReportsView(state: self.state) } }
   public func popoverDidClose(_ notification: Notification) {
     if let origin = shortcutOrigin {
       origin.activate(options: [])
@@ -127,56 +163,39 @@ struct SettingsWindowRoot: View {
       .frame(width: geometry.size.width, height: geometry.size.height)
     }.frame(minWidth: 460, minHeight: 360)
   }
-  private var operationMessages: some View {
-    Section("Status and recovery") {
-      if let warning = state.settingsRecoveryWarning {
-        Text(warning).fixedSize(horizontal: false, vertical: true)
-        Button("Save recovered settings and acknowledge") { state.saveRecoveredSettings() }
-      }
-      if let error = state.settingsError { Text(error).foregroundStyle(.red) }
-      if let error = state.soundError { Text(error).foregroundStyle(.red) }
-      if let error = state.loginError { Text(error).foregroundStyle(.red) }
-      if let error = state.hotKeyError { Text(error).foregroundStyle(.red) }
-      if let error = state.sleepError {
-        Text(error).foregroundStyle(.red)
-        Button("Retry sleep prevention") { state.updateSleepAssertion() }
-      }
-      if let error = state.retentionError {
-        Text(error).foregroundStyle(.red)
-        Button("Retry retention") { state.perform { await state.applyRetention() } }
+  @ViewBuilder private var operationMessages: some View {
+    if state.settingsRecoveryWarning != nil || state.settingsError != nil || state.soundError != nil
+      || state.loginError != nil || state.hotKeyError != nil || state.sleepError != nil
+      || state.retentionError != nil
+    {
+      Section("Status and recovery") {
+        if let warning = state.settingsRecoveryWarning {
+          Text(warning).fixedSize(horizontal: false, vertical: true)
+          Button("Save recovered settings and acknowledge") { state.saveRecoveredSettings() }
+        }
+        if let error = state.settingsError { Text(error).foregroundStyle(.red) }
+        if let error = state.soundError { Text(error).foregroundStyle(.red) }
+        if let error = state.loginError { Text(error).foregroundStyle(.red) }
+        if let error = state.hotKeyError { Text(error).foregroundStyle(.red) }
+        if let error = state.sleepError {
+          Text(error).foregroundStyle(.red)
+          Button("Retry sleep prevention") { state.updateSleepAssertion() }
+        }
+        if let error = state.retentionError {
+          Text(error).foregroundStyle(.red)
+          Button("Retry retention") { state.perform { await state.applyRetention() } }
+        }
       }
     }
   }
 }
-struct PopoverRoot: View {
-  @ObservedObject var state: AppState
-  @ObservedObject var sounds: SoundCatalogState
-  @State var showingList: Bool
-  let onListChange: (Bool) -> Void
-  let closePopover: () -> Void
-  let openSettings: () -> Void
-  let openTimerList: () -> Void
-  var body: some View {
-    VStack(spacing: 0) {
-      QuickEntryView(
-        state: state, showingList: $showingList, closePopover: closePopover,
-        openSettings: openSettings, openTimerList: openTimerList)
-      if showingList {
-        Divider()
-        TimerListHost(state: state, sounds: sounds)
-      }
-    }.onChange(of: showingList) { value in onListChange(value) }
-  }
-}
-
 struct TimerListHost: View {
   @ObservedObject var state: AppState
   @ObservedObject var sounds: SoundCatalogState
   @State private var ownsEditor = false
-  var openHistory: (() -> Void)? = nil
   var body: some View {
     TimerListView(
-      state: state, openHistory: openHistory,
+      state: state,
       editTimer: { id in
         state.perform {
           await state.selectEditor(id)

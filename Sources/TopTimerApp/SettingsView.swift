@@ -54,6 +54,17 @@ public struct TopTimerSettings: Equatable, Sendable {
     normalize()
   }
 
+  public func effectiveShortcut(for slot: HotKeySlot) -> Shortcut? {
+    switch slot {
+    case .quickEntry:
+      guard !quickEntryShortcutIsDisabled else { return nil }
+      return quickEntryShortcut ?? (try? Shortcut(keyCode: 17, modifiers: 768)) // Command-Shift-T
+    case .pauseResumePriority:
+      guard !pauseResumeShortcutIsDisabled else { return nil }
+      return pauseResumeShortcut ?? (try? Shortcut(keyCode: 35, modifiers: 768)) // Command-Shift-P
+    }
+  }
+
   public mutating func normalize() {
     snoozeSeconds = min(86_400, max(60, snoozeSeconds.isFinite ? snoozeSeconds : 300))
     historyPageSize = min(200, max(1, historyPageSize))
@@ -198,7 +209,7 @@ public struct SettingsView: View {
   }
 
   private func shortcut(for slot: HotKeySlot) -> Shortcut? {
-    slot == .quickEntry ? settings.quickEntryShortcut : settings.pauseResumeShortcut
+    settings.effectiveShortcut(for: slot)
   }
 
   private func setLogin(_ enabled: Bool) {

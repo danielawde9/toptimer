@@ -10,15 +10,10 @@ public struct TimerRowActionVisibility: Equatable, Sendable {
 public struct TimerListView: View {
   @ObservedObject var state: AppState
   @State private var recentlyDeleted = false
-  private let openHistory: (() -> Void)?
   private let editTimer: ((UUID) -> Void)?
-  public init(
-    state: AppState, recentlyDeleted: Bool = false, openHistory: (() -> Void)? = nil,
-    editTimer: ((UUID) -> Void)? = nil
-  ) {
+  public init(state: AppState, recentlyDeleted: Bool = false, editTimer: ((UUID) -> Void)? = nil) {
     self.state = state
     _recentlyDeleted = State(initialValue: recentlyDeleted)
-    self.openHistory = openHistory
     self.editTimer = editTimer
   }
   public var body: some View {
@@ -27,11 +22,9 @@ public struct TimerListView: View {
         Text("Timers").tag(false)
         Text("Recently Deleted").tag(true)
       }.pickerStyle(.segmented).labelsHidden().padding(8)
-      if openHistory != nil {
-        HStack {
-          Button("History", systemImage: "clock.arrow.circlepath") { openHistory?() }
-          Spacer()
-        }.padding(.horizontal, 8)
+      if let error = state.inlineError {
+        TimerOperationMessage(message: error, dismiss: state.dismissInlineError).padding(
+          .horizontal, 8)
       }
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {
@@ -61,7 +54,10 @@ public struct TimerListView: View {
           }
         }
       }
-    }.frame(width: 340, height: 260).accessibilityIdentifier("timer-list")
+      Divider()
+      DataCleanupControls(state: state).padding(12)
+    }.frame(minWidth: 340, minHeight: 260).background(Color(nsColor: .windowBackgroundColor))
+      .accessibilityIdentifier("timer-list")
   }
 }
 
@@ -100,10 +96,10 @@ private struct TimerRow: View {
           .focused($focused)
           // Keep the native menu in the focus and accessibility tree.
           .opacity(
-            TimerRowActionVisibility(isHovered: hovered, isFocused: focused).showsActions ? 1 : 0.01
+            TimerRowActionVisibility(isHovered: hovered, isFocused: focused).showsActions ? 1 : 0.65
           )
           .accessibilityHidden(false)
-      }.padding(8).onHover { hovered = $0 }
+      }.padding(12).onHover { hovered = $0 }
     }
   }
   @ViewBuilder private var actions: some View {
