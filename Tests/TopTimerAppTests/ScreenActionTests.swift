@@ -276,7 +276,7 @@ import XCTest
     try await store.close()
   }
 
-  func testRenderedStopwatchExampleAndFinish() async throws {
+  func testRenderedStopwatchEntryAndFinish() async throws {
     let store = try await CoreDataStore.inMemory()
     let state = AppState(
       repository: TimerCoreDataRepository(store: store), notifications: RecordingNotifications())
@@ -284,7 +284,8 @@ import XCTest
       rootView: MenuBarPopoverView(state: state, openSettings: {}, openTimers: {}, quit: {}))
     let window = mount(host, size: NSSize(width: 320, height: 300))
     defer { window.close() }
-    try press("stopwatch reading", in: host)
+    state.quickEntryText = "stopwatch reading"
+    try press("Start", in: host)
     await settle(state, host: host)
     XCTAssertEqual(state.displayedTimer?.kind, .stopwatch)
     XCTAssertEqual(state.displayedTimer?.title, "reading")
@@ -475,13 +476,14 @@ import XCTest
     try await store.close()
   }
 
-  func testPopoverShowsInvalidEntryFeedbackAndFreshExamples() async throws {
+  func testPopoverShowsInvalidEntryFeedbackWithoutBuiltInExamples() async throws {
     let state = AppState(repository: RecordingRepository(), notifications: RecordingNotifications())
     let host = NSHostingView(
       rootView: MenuBarPopoverView(state: state, openSettings: {}, openTimers: {}, quit: {}))
     let window = mount(host, size: NSSize(width: 320, height: 300))
     defer { window.close() }
-    XCTAssertTrue(try visibleText(in: host).contains("25m focus"))
+    XCTAssertFalse(try visibleText(in: host).contains("25m focus"))
+    XCTAssertTrue(state.quickEntryExamples.isEmpty)
     state.quickEntryText = "wrong"
     try press("Start", in: host)
     await settle(state, host: host)
@@ -504,7 +506,7 @@ import XCTest
     let fixture = mount(root, size: NSSize(width: 320, height: 300))
     defer { fixture.close() }
     root.layoutSubtreeIfNeeded()
-    try press("Open window", in: root)
+    try press("Open TopTimer", in: root)
     await settle(state, host: root)
     let main = try XCTUnwrap(NSApp.windows.first { $0.title == "TopTimer" && $0.isVisible })
     let content = try XCTUnwrap(main.contentView)

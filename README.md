@@ -49,7 +49,7 @@ Every app window has a **Go to** menu for Main window, Timers, Sequences, Histor
 Reports and Settings. Timer editing is under a timer’s **Actions → Edit**; shortcut
 capture is under **Settings → Change…**.
 
-Open **Sequences** from the menu-bar popover or **Go to** menu. The initial tasks are
+Open **Sequences** from the menu-bar popover’s **⋯** menu or **Go to** menu. The initial tasks are
 15 minutes Task 1, 15 minutes Task 2, and 30 minutes Task 3. Edit their names or
 minutes, add/remove rows, keep **Repeat endlessly** selected, and choose **Start
 sequence**. Only the current task runs. Pause/Resume and Stop control the sequence.
@@ -58,7 +58,9 @@ Keep TopTimer running for automatic transitions. After quitting or a delayed
 wake-up, the next task starts when the app resumes.
 
 Use **Remove** beside a saved suggestion or **Clear saved suggestions** beneath
-them. Built-in example commands appear when there are no saved suggestions.
+them. No built-in examples appear when there are no saved suggestions.
+The popover footer has **Open TopTimer** and a **⋯** menu for All timers,
+Sequences, Settings and Quit.
 In **All timers**, **Delete all timers** removes every timer while preserving
 history and suggestions. **Clear everything…** also removes history, deleted
 records, saved suggestions and the saved sequence; app settings and imported

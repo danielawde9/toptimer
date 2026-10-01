@@ -59,23 +59,36 @@ struct MenuBarPopoverView: View {
   }
 
   private var footer: some View {
-    VStack(spacing: 2) {
-      HStack(spacing: 4) {
-        FooterButton(title: "Settings", symbol: "gearshape", action: openSettings)
-        FooterButton(title: "All timers", symbol: "list.bullet", action: openTimers)
-        Spacer(minLength: 0)
-        FooterButton(title: "Quit", symbol: "power", action: quit)
+    HStack {
+      Button(action: openNow ?? openTimers) {
+        Label("Open TopTimer", systemImage: "macwindow")
+          .font(.callout)
       }
-      if let openSequences {
-        Button("Sequences", systemImage: "list.number", action: openSequences).buttonStyle(
-          .borderless
-        ).font(.caption).help("Sequences")
+      .buttonStyle(.borderless)
+      .help("Open TopTimer")
+      Spacer()
+      Menu {
+        Button("All timers", systemImage: "list.bullet", action: openTimers)
+        if let openSequences {
+          Button("Sequences", systemImage: "list.number", action: openSequences)
+        }
+        Divider()
+        Button("Settings", systemImage: "gearshape", action: openSettings)
+        Divider()
+        Button("Quit TopTimer", systemImage: "power", action: quit)
+      } label: {
+        Image(systemName: "ellipsis")
+          .frame(width: 28, height: 24)
+          .contentShape(Rectangle())
       }
-      if let openNow {
-        Button("Open window", systemImage: "macwindow", action: openNow)
-          .buttonStyle(.borderless).font(.caption).help("Open window")
-      }
-    }.padding(.horizontal, 8).padding(.vertical, 8)
+      .menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
+      .fixedSize()
+      .help("More options")
+      .accessibilityLabel("More options")
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
   }
 
   private func runningCard(_ timer: TimerItem) -> some View {
@@ -163,16 +176,5 @@ struct MenuBarPopoverView: View {
   private func start() {
     let entry = state.quickEntryText
     state.perform { await state.create(command: entry) }
-  }
-}
-
-private struct FooterButton: View {
-  let title: String
-  let symbol: String
-  let action: () -> Void
-  var body: some View {
-    Button(action: action) {
-      Label(title, systemImage: symbol).font(.callout)
-    }.buttonStyle(.borderless).foregroundStyle(.secondary).help(title)
   }
 }

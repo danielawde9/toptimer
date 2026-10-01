@@ -62,7 +62,7 @@ public final class AppState: ObservableObject {
       ?? activeTimers.first { $0.state == .running }
   }
   public var quickEntryExamples: [String] {
-    suggestions.isEmpty ? ["25m focus", "10m tea", "stopwatch reading"] : Array(suggestions.prefix(3))
+    Array(suggestions.prefix(3))
   }
   public func dismissInlineError() { inlineError = nil }
   @Published public internal(set) var selectedEditorTimer: TimerItem?

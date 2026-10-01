@@ -57,6 +57,7 @@ import XCTest
     let suggestionsCleared = await state.clearSuggestions()
     XCTAssertTrue(suggestionsCleared)
     XCTAssertTrue(state.suggestions.isEmpty)
+    XCTAssertTrue(state.quickEntryExamples.isEmpty, "Clearing suggestions must not restore built-in examples")
     try await store.close()
   }
 
